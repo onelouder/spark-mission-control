@@ -1,0 +1,990 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>nexus</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg-deep:    #06090f;
+  --bg:         #0a0f18;
+  --bg-raised:  #0e1422;
+  --bg-surface: #121a2a;
+  --border:     #1a2440;
+  --border-hi:  #243052;
+  --text:       #c8d3e8;
+  --text-dim:   #4e5d7a;
+  --text-muted: #2d3a54;
+  --cyan:       #00e5ff;
+  --green:      #00e676;
+  --yellow:     #ffab00;
+  --red:        #ff3d3d;
+  --pink:       #ff4081;
+  --purple:     #b388ff;
+  --orange:     #ff9100;
+  --blue:       #448aff;
+  --mono: 'IBM Plex Mono', 'Menlo', monospace;
+  --sans: 'DM Sans', system-ui, sans-serif;
+  --panel-radius: 8px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+body {
+  background: var(--bg-deep);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+}
+
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-hi); }
+
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+@keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ═══ TOP BAR ═══ */
+#topbar {
+  height: 40px; flex-shrink: 0;
+  display: flex; align-items: center; padding: 0 16px; gap: 14px;
+  background: linear-gradient(180deg, #0e1422 0%, var(--bg) 100%);
+  border-bottom: 1px solid var(--border);
+  position: relative; z-index: 50;
+}
+#topbar::after {
+  content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, #00e5ff15, transparent);
+}
+.logo { font-family: var(--mono); font-weight: 600; font-size: 13px; color: var(--cyan); letter-spacing: 0.12em; }
+.topbar-sep { width: 1px; height: 18px; background: var(--border); }
+.topbar-stat {
+  font-family: var(--mono); font-size: 10px; color: var(--text-dim);
+  display: flex; align-items: center; gap: 5px;
+}
+.topbar-stat .val { color: var(--cyan); }
+.topbar-stat .val.crit { color: var(--red); }
+.topbar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.topbar-btn {
+  background: none; border: 1px solid var(--border); color: var(--text-dim);
+  font-family: var(--mono); font-size: 10px; padding: 3px 10px; border-radius: 4px;
+  cursor: pointer; transition: all 0.15s;
+}
+.topbar-btn:hover { border-color: var(--border-hi); color: var(--text); }
+
+/* ═══ MAIN ═══ */
+#main { flex: 1; display: flex; overflow: hidden; }
+
+#chatstack {
+  flex: 1; display: flex; flex-direction: column;
+  overflow-y: auto; overflow-x: hidden;
+  padding: 6px; gap: 3px;
+}
+
+/* ── Agent Panel ── */
+.agent-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--panel-radius);
+  background: var(--bg);
+  overflow: hidden;
+  transition: border-color 0.2s, flex 0.25s ease;
+  flex-shrink: 0;
+}
+.agent-panel:hover:not(.active) { border-color: var(--border-hi); }
+.agent-panel.active {
+  border-color: #00e5ff30;
+  flex: 1 1 auto;
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+}
+.agent-panel.active .panel-header {
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border);
+}
+.agent-panel.has-unread:not(.active) { border-left: 3px solid var(--cyan); }
+.agent-panel.error:not(.active) { border-left: 3px solid var(--red); }
+
+.panel-header {
+  display: flex; align-items: center; padding: 7px 12px; gap: 10px;
+  cursor: pointer; user-select: none;
+  background: var(--bg);
+  transition: background 0.15s;
+  min-height: 40px;
+}
+.panel-header:hover { background: var(--bg-raised); }
+
+.status-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+}
+.status-dot.connected { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.status-dot.connecting { background: var(--yellow); animation: pulse 1s ease-in-out infinite; }
+.status-dot.disconnected { background: var(--text-muted); }
+.status-dot.error { background: var(--red); box-shadow: 0 0 6px var(--red); }
+
+.agent-name {
+  font-family: var(--mono); font-weight: 600; font-size: 12px; color: var(--text);
+  min-width: 60px; flex-shrink: 0;
+}
+.agent-role {
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.08em;
+  padding: 1px 6px; border-radius: 3px; flex-shrink: 0;
+}
+.role-research { color: var(--cyan); background: rgba(0,229,255,0.08); }
+.role-coder { color: var(--purple); background: rgba(179,136,255,0.08); }
+.role-reviewer { color: var(--pink); background: rgba(255,64,129,0.08); }
+.role-analyst { color: var(--green); background: rgba(0,230,118,0.08); }
+.role-writer { color: var(--yellow); background: rgba(255,171,0,0.08); }
+.role-default { color: var(--text-dim); background: rgba(78,93,122,0.08); }
+
+.last-msg {
+  flex: 1; min-width: 0;
+  font-family: var(--mono); font-size: 11px; color: var(--text-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.last-msg .lm-from { color: var(--text-muted); margin-right: 4px; }
+
+.header-stats {
+  display: flex; gap: 10px; font-family: var(--mono); font-size: 10px; color: var(--text-dim);
+  flex-shrink: 0;
+}
+.header-stats .sv { color: var(--text); }
+
+.expand-arrow {
+  font-size: 10px; color: var(--text-muted); flex-shrink: 0;
+  transition: transform 0.25s ease;
+}
+.agent-panel.active .expand-arrow { transform: rotate(180deg); }
+
+/* ── Chat Body ── */
+.panel-body {
+  display: none; flex-direction: column; overflow: hidden; flex: 1;
+}
+.agent-panel.active .panel-body { display: flex; }
+
+.panel-toolbar {
+  display: flex; align-items: center; padding: 3px 12px; gap: 5px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-deep);
+}
+.tb-btn {
+  background: none; border: none; color: var(--text-dim);
+  font-family: var(--mono); font-size: 10px; padding: 3px 8px;
+  cursor: pointer; border-radius: 3px; transition: all 0.12s;
+}
+.tb-btn:hover { background: var(--bg-raised); color: var(--text); }
+.tb-sep { width: 1px; height: 12px; background: var(--border); }
+.tb-info { font-family: var(--mono); font-size: 10px; color: var(--text-muted); margin-left: auto; }
+
+.messages {
+  flex: 1; overflow-y: auto; padding: 8px 14px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.msg {
+  display: flex; gap: 8px; animation: fadein 0.15s ease; line-height: 1.55;
+}
+.msg .msg-ts {
+  font-family: var(--mono); font-size: 10px; color: var(--text-muted);
+  min-width: 55px; padding-top: 2px; flex-shrink: 0; user-select: none;
+}
+.msg .msg-content { flex: 1; min-width: 0; }
+.msg .msg-sender {
+  font-family: var(--mono); font-size: 10px; margin-bottom: 1px; display: block;
+}
+.msg .msg-sender.you { color: var(--cyan); }
+.msg .msg-sender.agent { color: var(--green); }
+.msg .msg-sender.sys { color: var(--text-dim); }
+.msg .msg-body {
+  color: var(--text); font-size: 13px;
+  white-space: pre-wrap; word-break: break-word;
+}
+.msg .msg-body code {
+  background: var(--bg-deep); padding: 1px 5px; border-radius: 3px;
+  font-family: var(--mono); font-size: 12px; border: 1px solid var(--border);
+}
+.tag-thought { color: var(--yellow); font-weight: 500; }
+.tag-action { color: var(--purple); font-weight: 500; }
+.tag-output { color: var(--green); }
+.tag-error { color: var(--red); font-weight: 500; }
+.tag-log { color: var(--text-dim); }
+.tag-system { color: var(--text-dim); font-style: italic; }
+.tag-update { color: var(--cyan); }
+
+.streaming-cursor {
+  display: inline-block; width: 7px; height: 14px; background: var(--cyan);
+  margin-left: 2px; vertical-align: text-bottom;
+  animation: pulse 0.6s step-end infinite;
+}
+
+/* ── Input ── */
+.panel-input {
+  display: flex; align-items: center; padding: 8px 12px; gap: 8px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-raised);
+  flex-shrink: 0;
+}
+.panel-input input {
+  flex: 1; background: var(--bg); border: 1px solid var(--border);
+  color: var(--text); font-family: var(--mono); font-size: 13px;
+  padding: 9px 14px; border-radius: 6px; outline: none;
+  transition: border-color 0.15s;
+}
+.panel-input input:focus { border-color: rgba(0,229,255,0.25); }
+.panel-input input::placeholder { color: var(--text-muted); }
+.send-btn {
+  background: rgba(0,229,255,0.1); border: 1px solid rgba(0,229,255,0.2);
+  color: var(--cyan); font-family: var(--mono); font-weight: 600;
+  font-size: 11px; padding: 9px 16px; border-radius: 6px; cursor: pointer;
+  transition: all 0.15s;
+}
+.send-btn:hover { background: rgba(0,229,255,0.18); }
+
+/* ═══ MODALS ═══ */
+.modal-backdrop {
+  display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+  z-index: 200; align-items: center; justify-content: center;
+}
+.modal-backdrop.visible { display: flex; }
+.modal {
+  background: var(--bg-raised); border: 1px solid var(--border-hi);
+  border-radius: 12px; padding: 24px; width: 460px; max-width: 92vw;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+  animation: fadein 0.15s ease;
+}
+.modal h2 {
+  font-family: var(--mono); font-size: 14px; color: var(--cyan);
+  font-weight: 500; margin-bottom: 18px; letter-spacing: 0.05em;
+}
+.modal label {
+  display: block; font-family: var(--mono); font-size: 10px;
+  color: var(--text-dim); margin-bottom: 4px; letter-spacing: 0.06em;
+}
+.modal input, .modal select {
+  width: 100%; background: var(--bg); border: 1px solid var(--border);
+  color: var(--text); font-family: var(--mono); font-size: 12px;
+  padding: 9px 12px; border-radius: 6px; margin-bottom: 14px; outline: none;
+}
+.modal input:focus { border-color: rgba(0,229,255,0.25); }
+.modal-btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+.mbtn {
+  font-family: var(--mono); font-size: 11px; padding: 7px 16px;
+  border-radius: 6px; cursor: pointer; border: 1px solid var(--border);
+  background: none; color: var(--text); transition: all 0.12s;
+}
+.mbtn:hover { border-color: var(--border-hi); }
+.mbtn.primary { background: var(--cyan); color: var(--bg-deep); border-color: var(--cyan); font-weight: 600; }
+.mbtn.danger { color: var(--red); border-color: rgba(255,61,61,0.25); }
+
+#emptyState {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 16px; color: var(--text-dim);
+}
+#emptyState .empty-logo { font-size: 36px; color: var(--cyan); opacity: 0.2; }
+#emptyState .empty-text { font-family: var(--mono); font-size: 12px; text-align: center; line-height: 2; }
+.empty-btn {
+  margin-top: 8px; background: rgba(0,229,255,0.08); border: 1px solid rgba(0,229,255,0.2);
+  color: var(--cyan); font-family: var(--mono); font-size: 12px;
+  padding: 10px 24px; border-radius: 6px; cursor: pointer;
+}
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <span class="logo">◈ NEXUS</span>
+  <span class="topbar-sep"></span>
+  <span class="topbar-stat" id="tsConn"><span class="val">0/0</span> agents</span>
+  <span class="topbar-sep"></span>
+  <span class="topbar-stat">SPARK DGX · <span class="val">GB10</span></span>
+  <span class="topbar-right">
+    <button class="topbar-btn" onclick="connectAll()">▶ connect all</button>
+    <button class="topbar-btn" onclick="disconnectAll()">◼ stop</button>
+    <button class="topbar-btn" onclick="showAddModal()">+ agent</button>
+    <button class="topbar-btn" onclick="broadcastPrompt()">⊹ broadcast</button>
+    <button class="topbar-btn" onclick="saveConfig()">save</button>
+    <button class="topbar-btn" onclick="loadConfig()">load</button>
+  </span>
+</div>
+
+<div id="main">
+  <div id="chatstack">
+    <div id="emptyState">
+      <div class="empty-logo">◈</div>
+      <div class="empty-text">No agents configured.<br>Add your first agent to get started.</div>
+      <button class="empty-btn" onclick="showAddModal()">+ Add Agent</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="addModal">
+  <div class="modal">
+    <h2>+ ADD AGENT</h2>
+    <label>AGENT NAME</label>
+    <input type="text" id="mName" placeholder="jarvis" />
+    <label>WEBSOCKET URL</label>
+    <input type="text" id="mUrl" placeholder="ws://ether-spark:18789/api/chat/ws?agent=jarvis&token=..." />
+    <label>ROLE</label>
+    <select id="mRole">
+      <option value="default">— general —</option>
+      <option value="research">Research</option>
+      <option value="coder">Coder</option>
+      <option value="reviewer">Reviewer</option>
+      <option value="analyst">Analyst</option>
+      <option value="writer">Writer</option>
+    </select>
+    <div class="modal-btns">
+      <button class="mbtn" onclick="hideAddModal()">cancel</button>
+      <button class="mbtn primary" onclick="addAgentFromModal()">add agent</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="editModal">
+  <div class="modal">
+    <h2 id="editTitle">EDIT AGENT</h2>
+    <label>AGENT NAME</label>
+    <input type="text" id="eName" />
+    <label>WEBSOCKET URL</label>
+    <input type="text" id="eUrl" />
+    <label>ROLE</label>
+    <select id="eRole">
+      <option value="default">— general —</option>
+      <option value="research">Research</option>
+      <option value="coder">Coder</option>
+      <option value="reviewer">Reviewer</option>
+      <option value="analyst">Analyst</option>
+      <option value="writer">Writer</option>
+    </select>
+    <div class="modal-btns">
+      <button class="mbtn danger" id="editRemoveBtn">remove</button>
+      <span style="flex:1;"></span>
+      <button class="mbtn" onclick="hideEditModal()">cancel</button>
+      <button class="mbtn primary" id="editSaveBtn">save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════
+//  NEXUS — Stacked Multi-Agent Chat
+//  Zero dependencies. One file. Real WebSocket wiring.
+//
+//  >>> ADAPT <<< markers show where to match your MoltBot gateway.
+// ═══════════════════════════════════════════════════════════════════
+
+const ROLE_LABELS = {
+  research:'RESEARCH', coder:'CODER', reviewer:'REVIEWER',
+  analyst:'ANALYST', writer:'WRITER', default:'',
+};
+
+let agents = {};
+let activeId = null;
+let agentOrder = [];
+let nextId = 1;
+
+const $stack = document.getElementById('chatstack');
+const $empty = document.getElementById('emptyState');
+
+// ═══ AGENT CRUD ══════════════════════════════════════════════════
+
+function addAgent(name, url, role) {
+  role = role || 'default';
+  const id = 'a' + (nextId++);
+  agents[id] = {
+    name: name, url: url, role: role,
+    ws: null, status: 'disconnected',
+    messages: [], unread: 0,
+    streamBuf: null, msgCount: 0,
+  };
+  agentOrder.push(id);
+  renderStack();
+  if (agentOrder.length === 1) activatePanel(id);
+  updateTopbar();
+  return id;
+}
+
+function removeAgent(id) {
+  if (agents[id] && agents[id].ws) agents[id].ws.close(1000);
+  delete agents[id];
+  agentOrder = agentOrder.filter(function(x) { return x !== id; });
+  if (activeId === id) activeId = agentOrder[0] || null;
+  renderStack();
+  updateTopbar();
+}
+
+// ═══ WEBSOCKET ═══════════════════════════════════════════════════
+
+function connectAgent(id) {
+  var agent = agents[id];
+  if (!agent || agent.status === 'connected') return;
+
+  agent.status = 'connecting';
+  refreshHeader(id);
+  pushSys(id, 'Connecting...');
+
+  try {
+    var ws = new WebSocket(agent.url);
+
+    ws.onopen = function() {
+      agent.status = 'connected';
+      agent.ws = ws;
+      pushSys(id, 'Connected.');
+      refreshHeader(id);
+      updateTopbar();
+    };
+
+    ws.onmessage = function(event) {
+      handleIncoming(id, event.data);
+    };
+
+    ws.onerror = function() {
+      agent.status = 'error';
+      pushSys(id, 'Connection error.');
+      refreshHeader(id);
+      updateTopbar();
+    };
+
+    ws.onclose = function(event) {
+      agent.status = 'disconnected';
+      agent.ws = null;
+      pushSys(id, 'Disconnected (' + event.code + ').');
+      refreshHeader(id);
+      updateTopbar();
+      // Auto-reconnect on unexpected close
+      if (event.code !== 1000 && agents[id]) {
+        setTimeout(function() {
+          if (agents[id] && agents[id].status === 'disconnected') {
+            pushSys(id, 'Reconnecting...');
+            connectAgent(id);
+          }
+        }, 5000);
+      }
+    };
+
+    agent.ws = ws;
+  } catch (err) {
+    agent.status = 'error';
+    pushSys(id, 'Failed: ' + err.message);
+    refreshHeader(id);
+  }
+}
+
+function disconnectAgent(id) {
+  if (agents[id] && agents[id].ws) agents[id].ws.close(1000, 'User disconnect');
+}
+
+function connectAll() {
+  for (var i = 0; i < agentOrder.length; i++) connectAgent(agentOrder[i]);
+}
+
+function disconnectAll() {
+  for (var i = 0; i < agentOrder.length; i++) disconnectAgent(agentOrder[i]);
+}
+
+// ═══ INCOMING MESSAGES ═══════════════════════════════════════════
+
+function handleIncoming(id, raw) {
+  var agent = agents[id];
+  if (!agent) return;
+
+  // >>> ADAPT: Match your MoltBot gateway output format <<<
+  var data;
+  try {
+    data = JSON.parse(raw);
+  } catch (e) {
+    // Plain text — show directly
+    pushAgent(id, raw);
+    return;
+  }
+
+  // Streaming chunks
+  if (data.type === 'chunk' || data.type === 'stream' || data.type === 'token') {
+    var token = data.token || data.content || data.text || '';
+    var done = data.done || data.finished || data.complete || false;
+
+    if (!agent.streamBuf) {
+      agent.streamBuf = '';
+      agent.messages.push({
+        sender: agent.name, cls: 'agent', text: '', ts: now(), streaming: true
+      });
+    }
+    agent.streamBuf += token;
+    var last = agent.messages[agent.messages.length - 1];
+    if (last && last.streaming) last.text = agent.streamBuf;
+
+    if (done) {
+      if (last) last.streaming = false;
+      agent.streamBuf = null;
+    }
+    if (activeId === id) renderMessages(id);
+    refreshHeader(id);
+    return;
+  }
+
+  // Complete message
+  if (data.content || data.text || data.message || data.response) {
+    pushAgent(id, data.content || data.text || data.message || data.response);
+    return;
+  }
+
+  // System/status
+  if (data.type === 'status' || data.type === 'system') {
+    pushSys(id, data.message || data.text || JSON.stringify(data));
+    return;
+  }
+
+  // Fallback
+  pushAgent(id, JSON.stringify(data, null, 2));
+}
+
+function sendMessage(id, text) {
+  var agent = agents[id];
+  if (!agent) return;
+  if (agent.status !== 'connected' || !agent.ws) {
+    pushSys(id, 'Not connected.');
+    return;
+  }
+  pushMsg(id, 'YOU', 'you', text);
+
+  // >>> ADAPT: Outgoing format for MoltBot gateway <<<
+  // Plain text (try first):
+  agent.ws.send(text);
+  // JSON envelope (uncomment if needed):
+  // agent.ws.send(JSON.stringify({ type: 'message', content: text }));
+}
+
+// ═══ MESSAGE HELPERS ═════════════════════════════════════════════
+
+function pushMsg(id, sender, cls, text) {
+  var a = agents[id];
+  if (!a) return;
+  a.messages.push({ sender: sender, cls: cls, text: text, ts: now() });
+  a.msgCount++;
+  if (id !== activeId) a.unread++;
+  if (activeId === id) renderMessages(id);
+  refreshHeader(id);
+}
+
+function pushAgent(id, text) {
+  var a = agents[id];
+  pushMsg(id, a ? a.name : '?', 'agent', text);
+}
+
+function pushSys(id, text) {
+  pushMsg(id, 'SYS', 'sys', text);
+}
+
+// ═══ RENDERING ═══════════════════════════════════════════════════
+
+function renderStack() {
+  $empty.style.display = agentOrder.length === 0 ? 'flex' : 'none';
+
+  // Remove stale panels
+  var panels = $stack.querySelectorAll('.agent-panel');
+  for (var i = 0; i < panels.length; i++) {
+    if (!agents[panels[i].dataset.id]) panels[i].remove();
+  }
+
+  // Add/reorder
+  var anchor = $empty;
+  for (var j = 0; j < agentOrder.length; j++) {
+    var id = agentOrder[j];
+    var panel = $stack.querySelector('.agent-panel[data-id="' + id + '"]');
+    if (!panel) {
+      panel = buildPanel(id);
+      $stack.insertBefore(panel, anchor);
+    } else {
+      $stack.insertBefore(panel, anchor);
+    }
+    syncPanel(id, panel);
+    anchor = panel.nextSibling;
+  }
+}
+
+function buildPanel(id) {
+  var a = agents[id];
+  var p = document.createElement('div');
+  p.className = 'agent-panel';
+  p.dataset.id = id;
+
+  var roleHtml = ROLE_LABELS[a.role] ?
+    '<span class="agent-role role-' + a.role + '">' + ROLE_LABELS[a.role] + '</span>' : '';
+
+  p.innerHTML =
+    '<div class="panel-header" onclick="activatePanel(\'' + id + '\')">' +
+      '<span class="status-dot ' + a.status + '"></span>' +
+      '<span class="agent-name">' + esc(a.name) + '</span>' +
+      roleHtml +
+      '<span class="last-msg" data-ref="lm"></span>' +
+      '<span class="header-stats" data-ref="stats"></span>' +
+      '<span class="expand-arrow">▾</span>' +
+    '</div>' +
+    '<div class="panel-body">' +
+      '<div class="panel-toolbar">' +
+        '<button class="tb-btn" onclick="event.stopPropagation(); toggleConn(\'' + id + '\')" data-ref="connbtn">connect</button>' +
+        '<span class="tb-sep"></span>' +
+        '<button class="tb-btn" onclick="event.stopPropagation(); clearMsgs(\'' + id + '\')">clear</button>' +
+        '<button class="tb-btn" onclick="event.stopPropagation(); exportMsgs(\'' + id + '\')">export</button>' +
+        '<button class="tb-btn" onclick="event.stopPropagation(); showEditModal(\'' + id + '\')">edit</button>' +
+        '<span class="tb-info" data-ref="tbinfo"></span>' +
+      '</div>' +
+      '<div class="messages" data-ref="msgs"></div>' +
+      '<div class="panel-input">' +
+        '<input type="text" data-ref="input" placeholder="Message ' + esc(a.name) + '..." onkeydown="if(event.key===\'Enter\'){sendFromInput(\'' + id + '\');}" />' +
+        '<button class="send-btn" onclick="sendFromInput(\'' + id + '\')">SEND ↵</button>' +
+      '</div>' +
+    '</div>';
+
+  return p;
+}
+
+function getRef(id, ref) {
+  var panel = $stack.querySelector('.agent-panel[data-id="' + id + '"]');
+  return panel ? panel.querySelector('[data-ref="' + ref + '"]') : null;
+}
+
+function syncPanel(id, panel) {
+  var a = agents[id];
+  if (!panel) panel = $stack.querySelector('.agent-panel[data-id="' + id + '"]');
+  if (!panel || !a) return;
+
+  panel.className = 'agent-panel' +
+    (activeId === id ? ' active' : '') +
+    (a.unread > 0 && activeId !== id ? ' has-unread' : '') +
+    (a.status === 'error' ? ' error' : '');
+
+  refreshHeader(id);
+  if (activeId === id) renderMessages(id);
+}
+
+function refreshHeader(id) {
+  var a = agents[id];
+  if (!a) return;
+
+  var dot = document.querySelector('.agent-panel[data-id="' + id + '"] .status-dot');
+  if (dot) dot.className = 'status-dot ' + a.status;
+
+  var lm = getRef(id, 'lm');
+  if (lm) {
+    var last = a.messages[a.messages.length - 1];
+    if (last) {
+      var from = last.cls === 'you' ? 'you: ' : last.cls === 'sys' ? '' : '';
+      lm.innerHTML = '<span class="lm-from">' + from + '</span>' + esc(last.text.replace(/\n/g, ' ').substring(0, 100));
+    } else {
+      lm.textContent = '';
+    }
+  }
+
+  var stats = getRef(id, 'stats');
+  if (stats) {
+    var parts = [];
+    if (a.unread > 0 && activeId !== id) parts.push('<span class="sv" style="color:var(--cyan)">' + a.unread + '</span>');
+    if (a.msgCount > 0) parts.push(a.msgCount + 'msg');
+    stats.innerHTML = parts.join(' · ');
+  }
+
+  var connBtn = getRef(id, 'connbtn');
+  if (connBtn) {
+    connBtn.textContent = a.status === 'connected' ? 'disconnect' :
+                          a.status === 'connecting' ? 'connecting...' : 'connect';
+  }
+
+  var tbinfo = getRef(id, 'tbinfo');
+  if (tbinfo) {
+    tbinfo.textContent = a.status === 'connected' ?
+      '● live · ' + a.url.replace(/^wss?:\/\//, '').split('?')[0] : a.status;
+  }
+}
+
+function renderMessages(id) {
+  var a = agents[id];
+  var $msgs = getRef(id, 'msgs');
+  if (!a || !$msgs) return;
+
+  var atBottom = $msgs.scrollHeight - $msgs.scrollTop - $msgs.clientHeight < 80;
+  var html = '';
+
+  for (var i = 0; i < a.messages.length; i++) {
+    var m = a.messages[i];
+    var body = colorize(esc(m.text));
+    var cursor = m.streaming ? '<span class="streaming-cursor"></span>' : '';
+    html += '<div class="msg">' +
+      '<span class="msg-ts">' + m.ts + '</span>' +
+      '<div class="msg-content">' +
+        '<span class="msg-sender ' + m.cls + '">' + esc(m.sender) + '</span>' +
+        '<span class="msg-body">' + body + cursor + '</span>' +
+      '</div></div>';
+  }
+
+  if (!html) {
+    html = '<div class="msg"><span class="msg-ts"></span><div class="msg-content">' +
+      '<span class="msg-body" style="color:var(--text-muted)">' +
+      (a.status !== 'connected' ? 'Click connect to start.' : 'Type below to begin.') +
+      '</span></div></div>';
+  }
+
+  $msgs.innerHTML = html;
+  if (atBottom) $msgs.scrollTop = $msgs.scrollHeight;
+}
+
+// ═══ INTERACTIONS ════════════════════════════════════════════════
+
+function activatePanel(id) {
+  activeId = id;
+  if (agents[id]) agents[id].unread = 0;
+  for (var i = 0; i < agentOrder.length; i++) {
+    var aid = agentOrder[i];
+    var panel = $stack.querySelector('.agent-panel[data-id="' + aid + '"]');
+    if (panel) syncPanel(aid, panel);
+  }
+  setTimeout(function() {
+    var inp = getRef(id, 'input');
+    if (inp) inp.focus();
+  }, 60);
+}
+
+function toggleConn(id) {
+  var a = agents[id];
+  if (!a) return;
+  a.status === 'connected' ? disconnectAgent(id) : connectAgent(id);
+}
+
+function sendFromInput(id) {
+  var inp = getRef(id, 'input');
+  if (!inp) return;
+  var text = inp.value.trim();
+  if (!text) return;
+
+  if (text.startsWith('/')) {
+    handleCmd(id, text);
+    inp.value = '';
+    return;
+  }
+
+  if (text.startsWith('@')) {
+    var m = text.match(/^@(\S+)\s+([\s\S]+)/);
+    if (m) {
+      var targetName = m[1].toLowerCase();
+      var targetId = null;
+      for (var k in agents) {
+        if (agents[k].name.toLowerCase() === targetName) { targetId = k; break; }
+      }
+      if (targetId) {
+        sendMessage(targetId, m[2]);
+        activatePanel(targetId);
+        inp.value = '';
+        return;
+      }
+      pushSys(id, 'Agent "' + m[1] + '" not found.');
+    }
+  }
+
+  sendMessage(id, text);
+  inp.value = '';
+}
+
+function handleCmd(id, text) {
+  var parts = text.split(/\s+/);
+  switch (parts[0]) {
+    case '/clear': clearMsgs(id); break;
+    case '/export': exportMsgs(id); break;
+    case '/connect': connectAgent(id); break;
+    case '/disconnect': disconnectAgent(id); break;
+    case '/broadcast':
+      var msg = parts.slice(1).join(' ');
+      if (msg) broadcastMsg(msg);
+      break;
+    case '/help':
+      pushSys(id, '/clear /export /connect /disconnect\n/broadcast <msg> — send to all\n@name <msg> — cross-send\nCtrl+] Ctrl+[ — cycle panels\nCtrl+K — focus input');
+      break;
+    default: pushSys(id, 'Unknown: ' + parts[0]);
+  }
+}
+
+function clearMsgs(id) {
+  if (agents[id]) {
+    agents[id].messages = [];
+    agents[id].msgCount = 0;
+    renderMessages(id);
+    refreshHeader(id);
+  }
+}
+
+function exportMsgs(id) {
+  var a = agents[id];
+  if (!a) return;
+  var t = '=== ' + a.name + ' — ' + new Date().toISOString() + ' ===\n\n';
+  for (var i = 0; i < a.messages.length; i++) {
+    var m = a.messages[i];
+    t += '[' + m.ts + '] ' + m.sender + ': ' + m.text + '\n';
+  }
+  dl('nexus-' + a.name + '-' + new Date().toISOString().slice(0, 10) + '.txt', t);
+}
+
+function broadcastMsg(text) {
+  if (!text) return;
+  var sent = 0;
+  for (var id in agents) {
+    if (agents[id].status === 'connected') { sendMessage(id, text); sent++; }
+  }
+  if (!sent && activeId) pushSys(activeId, 'No agents connected.');
+}
+
+function broadcastPrompt() {
+  var t = prompt('Broadcast to all connected agents:');
+  if (t) broadcastMsg(t);
+}
+
+// ═══ MODALS ══════════════════════════════════════════════════════
+
+function showAddModal() {
+  document.getElementById('addModal').classList.add('visible');
+  document.getElementById('mName').value = '';
+  document.getElementById('mUrl').value = '';
+  document.getElementById('mRole').value = 'default';
+  setTimeout(function() { document.getElementById('mName').focus(); }, 50);
+}
+function hideAddModal() { document.getElementById('addModal').classList.remove('visible'); }
+
+function addAgentFromModal() {
+  var name = document.getElementById('mName').value.trim();
+  var url = document.getElementById('mUrl').value.trim();
+  var role = document.getElementById('mRole').value;
+  if (!name || !url) return alert('Name and URL required.');
+  addAgent(name, url, role);
+  hideAddModal();
+}
+
+var editingId = null;
+function showEditModal(id) {
+  editingId = id;
+  var a = agents[id];
+  if (!a) return;
+  document.getElementById('editTitle').textContent = 'EDIT — ' + a.name;
+  document.getElementById('eName').value = a.name;
+  document.getElementById('eUrl').value = a.url;
+  document.getElementById('eRole').value = a.role;
+  document.getElementById('editRemoveBtn').onclick = function() { removeAgent(id); hideEditModal(); };
+  document.getElementById('editSaveBtn').onclick = function() {
+    a.name = document.getElementById('eName').value.trim() || a.name;
+    a.url = document.getElementById('eUrl').value.trim() || a.url;
+    a.role = document.getElementById('eRole').value;
+    renderStack();
+    hideEditModal();
+  };
+  document.getElementById('editModal').classList.add('visible');
+}
+function hideEditModal() { document.getElementById('editModal').classList.remove('visible'); editingId = null; }
+
+document.getElementById('addModal').addEventListener('click', function(e) { if (e.target.id === 'addModal') hideAddModal(); });
+document.getElementById('editModal').addEventListener('click', function(e) { if (e.target.id === 'editModal') hideEditModal(); });
+
+// ═══ PERSISTENCE ═════════════════════════════════════════════════
+
+function saveConfig() {
+  var cfg = [];
+  for (var i = 0; i < agentOrder.length; i++) {
+    var a = agents[agentOrder[i]];
+    cfg.push({ name: a.name, url: a.url, role: a.role });
+  }
+  localStorage.setItem('nexus_config', JSON.stringify(cfg));
+  if (activeId) pushSys(activeId, 'Saved ' + cfg.length + ' agents.');
+}
+
+function loadConfig() {
+  try {
+    var raw = localStorage.getItem('nexus_config');
+    if (!raw) return alert('No saved config.');
+    var cfg = JSON.parse(raw);
+    var n = 0;
+    for (var i = 0; i < cfg.length; i++) {
+      var c = cfg[i];
+      var exists = false;
+      for (var k in agents) { if (agents[k].name === c.name) { exists = true; break; } }
+      if (!exists) { addAgent(c.name, c.url, c.role || 'default'); n++; }
+    }
+    if (activeId) pushSys(activeId, 'Loaded ' + n + ' agents.');
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+// ═══ TOPBAR ══════════════════════════════════════════════════════
+
+function updateTopbar() {
+  var total = agentOrder.length;
+  var connected = 0;
+  for (var k in agents) { if (agents[k].status === 'connected') connected++; }
+  document.getElementById('tsConn').innerHTML =
+    '<span class="val' + (connected === 0 && total > 0 ? ' crit' : '') + '">' + connected + '/' + total + '</span> agents';
+}
+
+// ═══ KEYBOARD ════════════════════════════════════════════════════
+
+document.addEventListener('keydown', function(e) {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+    e.preventDefault();
+    if (activeId) { var inp = getRef(activeId, 'input'); if (inp) inp.focus(); }
+  }
+  if (e.ctrlKey && e.key === ']') {
+    e.preventDefault();
+    var idx = agentOrder.indexOf(activeId);
+    if (idx >= 0) activatePanel(agentOrder[(idx + 1) % agentOrder.length]);
+  }
+  if (e.ctrlKey && e.key === '[') {
+    e.preventDefault();
+    var idx2 = agentOrder.indexOf(activeId);
+    if (idx2 >= 0) activatePanel(agentOrder[(idx2 - 1 + agentOrder.length) % agentOrder.length]);
+  }
+  if (e.key === 'Escape') { hideAddModal(); hideEditModal(); }
+});
+
+// ═══ UTILITIES ═══════════════════════════════════════════════════
+
+function now() {
+  return new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function esc(s) {
+  var d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function colorize(h) {
+  return h
+    .replace(/\[THOUGHT\]/g, '<span class="tag-thought">[THOUGHT]</span>')
+    .replace(/\[ACTION\]/g, '<span class="tag-action">[ACTION]</span>')
+    .replace(/\[OUTPUT\]/g, '<span class="tag-output">[OUTPUT]</span>')
+    .replace(/\[ERROR\]/g, '<span class="tag-error">[ERROR]</span>')
+    .replace(/\[LOG\]/g, '<span class="tag-log">[LOG]</span>')
+    .replace(/\[SYSTEM\]/g, '<span class="tag-system">[SYSTEM]</span>')
+    .replace(/\[UPDATE\]/g, '<span class="tag-update">[UPDATE]</span>')
+    .replace(/\[PROGRESS[^\\]]*\]/g, function(m) { return '<span class="tag-update">' + m + '</span>'; });
+}
+
+function dl(name, text) {
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// ═══ STARTUP ═════════════════════════════════════════════════════
+
+(function init() {
+  updateTopbar();
+  var raw = localStorage.getItem('nexus_config');
+  if (raw) {
+    try {
+      var cfg = JSON.parse(raw);
+      for (var i = 0; i < cfg.length; i++) addAgent(cfg[i].name, cfg[i].url, cfg[i].role || 'default');
+      if (agentOrder.length > 0) activatePanel(agentOrder[0]);
+    } catch (e) { /* ignore */ }
+  }
+})();
+</script>
+</body>
+</html>

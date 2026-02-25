@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="/static/favicon.png">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <title>Contacts - Mission Control</title>
+    <link rel="stylesheet" href="/static/ide-noir.css">
+    <link rel="stylesheet" href="/static/mission-control.css">
+    <style>
+        /* Legacy contacts-specific styles - TODO: migrate to mission-control.css */
+        :root {
+            --bg-primary: #0f1419;
+            --bg-secondary: #1a1f2e;
+            --bg-card: #232936;
+            --border: #2d3748;
+            --text-primary: #ffffff;
+            --text-secondary: #a0aec0;
+            --text-muted: #718096;
+            --accent: #00d4aa;
+            --priority: #f59e0b;
+            --danger: #ef4444;
+        }
+        
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+        
+        .nav {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .nav-title { font-size: 1.25rem; font-weight: 600; }
+        .nav-links { display: flex; gap: 1rem; }
+        .nav-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+        }
+        .nav-links a:hover { background: var(--bg-card); color: var(--text-primary); }
+        
+        .main {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        
+        .header {
+            margin-bottom: 2rem;
+        }
+        
+        .header h1 {
+            margin-bottom: 0.5rem;
+        }
+        
+        .header p {
+            color: var(--text-secondary);
+        }
+        
+        .section {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+        }
+        
+        .section-header {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .section-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+        
+        .section-count {
+            background: var(--bg-card);
+            padding: 0.25rem 0.75rem;
+            border-radius: 12px;
+            font-size: 0.875rem;
+            color: var(--text-muted);
+        }
+        
+        .contact-list {
+            padding: 0.5rem;
+        }
+        
+        .contact-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem 1rem;
+            border-radius: 6px;
+        }
+        
+        .contact-item:hover {
+            background: var(--bg-card);
+        }
+        
+        .contact-info {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+        
+        .contact-name {
+            font-weight: 500;
+        }
+        
+        .contact-email {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+        }
+        
+        .contact-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+        
+        .btn {
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: var(--bg-card);
+            color: var(--text-primary);
+            cursor: pointer;
+            font-size: 0.875rem;
+        }
+        
+        .btn:hover {
+            border-color: var(--accent);
+        }
+        
+        .btn-danger:hover {
+            border-color: var(--danger);
+            color: var(--danger);
+        }
+        
+        .btn-primary {
+            background: var(--accent);
+            color: black;
+            border-color: var(--accent);
+        }
+        
+        .add-form {
+            padding: 1rem 1.5rem;
+            border-top: 1px solid var(--border);
+            display: flex;
+            gap: 0.5rem;
+        }
+        
+        .add-form input {
+            flex: 1;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: var(--bg-card);
+            color: var(--text-primary);
+        }
+        
+        .add-form input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+        
+        .domain-badge {
+            background: var(--bg-card);
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin: 0.25rem;
+        }
+        
+        .domain-badge .remove {
+            cursor: pointer;
+            color: var(--text-muted);
+        }
+        
+        .domain-badge .remove:hover {
+            color: var(--danger);
+        }
+        
+        .domains-container {
+            padding: 1rem 1.5rem;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+        
+        .info-box {
+            background: var(--bg-card);
+            border-left: 3px solid var(--accent);
+            padding: 1rem 1.5rem;
+            margin: 1rem 1.5rem;
+            border-radius: 0 6px 6px 0;
+        }
+        
+        .info-box p {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+    </style>
+</head>
+<body>
+    <nav class="nav">
+        <div class="nav-title">Contact Management</div>
+        <div class="nav-links">
+            <a href="/">Kanban</a>
+            <a href="/briefing">Briefing</a>
+            <a href="/email">Email</a>
+            <a href="/queue">Queue</a>
+        </div>
+    </nav>
+    
+    <main class="main">
+        <div class="header">
+            <h1>Priority Contacts</h1>
+            <p>Emails from these contacts will automatically create tasks. All others go to triage.</p>
+        </div>
+        
+        <div class="info-box">
+            <p><strong>How it works:</strong> Only emails from Top 20, Top 100, pinned contacts, or partner domains will create Kanban tasks. Everything else stays in your inbox for triage.</p>
+        </div>
+        
+        <!-- Top 20 -->
+        <div class="section">
+            <div class="section-header">
+                <span class="section-title">⭐ Top 20 Critical Contacts</span>
+                <span class="section-count" id="top20-count">0</span>
+            </div>
+            <div class="contact-list" id="top20-list"></div>
+            <div class="add-form">
+                <input type="email" id="add-top20-email" placeholder="email@example.com">
+                <input type="text" id="add-top20-name" placeholder="Name (optional)">
+                <button class="btn btn-primary" onclick="addContact('top20')">Add</button>
+            </div>
+        </div>
+        
+        <!-- Partner Domains -->
+        <div class="section">
+            <div class="section-header">
+                <span class="section-title">🏢 Partner Domains</span>
+                <span class="section-count" id="domains-count">0</span>
+            </div>
+            <div class="domains-container" id="domains-list"></div>
+            <div class="add-form">
+                <input type="text" id="add-domain" placeholder="example.com">
+                <button class="btn btn-primary" onclick="addDomain()">Add Domain</button>
+            </div>
+        </div>
+        
+        <!-- Top 100 -->
+        <div class="section">
+            <div class="section-header">
+                <span class="section-title">📋 Top 100 Important Contacts</span>
+                <span class="section-count" id="top100-count">0</span>
+            </div>
+            <div class="contact-list" id="top100-list" style="max-height: 400px; overflow-y: auto;"></div>
+        </div>
+        
+        <!-- Pinned -->
+        <div class="section">
+            <div class="section-header">
+                <span class="section-title">📌 Pinned Contacts</span>
+                <span class="section-count" id="pinned-count">0</span>
+            </div>
+            <div class="contact-list" id="pinned-list"></div>
+            <div class="add-form">
+                <input type="email" id="add-pinned-email" placeholder="email@example.com">
+                <input type="text" id="add-pinned-name" placeholder="Name (optional)">
+                <button class="btn btn-primary" onclick="addContact('pinned_contacts')">Pin Contact</button>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        let contactsData = {};
+        
+        async function loadContacts() {
+            try {
+                const response = await fetch('/api/contacts');
+                contactsData = await response.json();
+                renderContacts();
+            } catch (error) {
+                console.error('Failed to load contacts:', error);
+            }
+        }
+        
+        function renderContacts() {
+            // Top 20
+            const top20 = contactsData.top20 || [];
+            document.getElementById('top20-count').textContent = top20.length;
+            document.getElementById('top20-list').innerHTML = top20.map(c => `
+                <div class="contact-item">
+                    <div class="contact-info">
+                        <span class="contact-name">${escapeHtml(c.name)}</span>
+                        <span class="contact-email">${escapeHtml(c.email)}</span>
+                    </div>
+                    <div class="contact-actions">
+                        <button class="btn btn-danger" onclick="removeContact('top20', '${escapeHtml(c.email)}')">Remove</button>
+                    </div>
+                </div>
+            `).join('');
+            
+            // Top 100
+            const top100 = contactsData.top100 || [];
+            document.getElementById('top100-count').textContent = top100.length;
+            document.getElementById('top100-list').innerHTML = top100.map(c => `
+                <div class="contact-item">
+                    <div class="contact-info">
+                        <span class="contact-name">${escapeHtml(c.name)}</span>
+                        <span class="contact-email">${escapeHtml(c.email)} (${c.count} emails)</span>
+                    </div>
+                </div>
+            `).join('');
+            
+            // Pinned
+            const pinned = contactsData.pinned_contacts || [];
+            document.getElementById('pinned-count').textContent = pinned.length;
+            document.getElementById('pinned-list').innerHTML = pinned.map(c => `
+                <div class="contact-item">
+                    <div class="contact-info">
+                        <span class="contact-name">${escapeHtml(c.name || c.email)}</span>
+                        <span class="contact-email">${escapeHtml(c.email)}</span>
+                    </div>
+                    <div class="contact-actions">
+                        <button class="btn btn-danger" onclick="removeContact('pinned_contacts', '${escapeHtml(c.email)}')">Remove</button>
+                    </div>
+                </div>
+            `).join('');
+            
+            // Domains
+            const domains = contactsData.partner_domains || [];
+            document.getElementById('domains-count').textContent = domains.length;
+            document.getElementById('domains-list').innerHTML = domains.map(d => `
+                <span class="domain-badge">
+                    @${escapeHtml(d)}
+                    <span class="remove" onclick="removeDomain('${escapeHtml(d)}')">&times;</span>
+                </span>
+            `).join('');
+        }
+        
+        async function addContact(listType) {
+            const emailInput = document.getElementById(`add-${listType === 'pinned_contacts' ? 'pinned' : listType}-email`);
+            const nameInput = document.getElementById(`add-${listType === 'pinned_contacts' ? 'pinned' : listType}-name`);
+            
+            const email = emailInput.value.trim();
+            const name = nameInput?.value.trim() || '';
+            
+            if (!email) return;
+            
+            try {
+                await fetch('/api/contacts/add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ list_type: listType, email, name })
+                });
+                
+                emailInput.value = '';
+                if (nameInput) nameInput.value = '';
+                loadContacts();
+            } catch (error) {
+                console.error('Failed to add contact:', error);
+            }
+        }
+        
+        async function removeContact(listType, email) {
+            try {
+                await fetch(`/api/contacts/remove?list_type=${listType}&email=${encodeURIComponent(email)}`, {
+                    method: 'DELETE'
+                });
+                loadContacts();
+            } catch (error) {
+                console.error('Failed to remove contact:', error);
+            }
+        }
+        
+        async function addDomain() {
+            const input = document.getElementById('add-domain');
+            const domain = input.value.trim().replace(/^@/, '');
+            
+            if (!domain) return;
+            
+            try {
+                await fetch('/api/contacts/add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ list_type: 'partner_domains', domain })
+                });
+                
+                input.value = '';
+                loadContacts();
+            } catch (error) {
+                console.error('Failed to add domain:', error);
+            }
+        }
+        
+        async function removeDomain(domain) {
+            try {
+                await fetch(`/api/contacts/remove?list_type=partner_domains&domain=${encodeURIComponent(domain)}`, {
+                    method: 'DELETE'
+                });
+                loadContacts();
+            } catch (error) {
+                console.error('Failed to remove domain:', error);
+            }
+        }
+        
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str.replace(/[&<>"']/g, m => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            }[m]));
+        }
+        
+        loadContacts();
+    </script>
+</body>
+</html>

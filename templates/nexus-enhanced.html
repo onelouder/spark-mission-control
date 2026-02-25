@@ -1,0 +1,920 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" type="image/svg+xml" href="/static/favicon-synapse.svg">
+<title>Mission Control — Nexus Enhanced</title>
+<link rel="stylesheet" href="/static/ide-noir.css">
+<link rel="stylesheet" href="/static/mission-control.css">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Nexus Performance Optimizations + Agent Management */
+:root {
+  --nx-bg-deep:    #06090f;
+  --nx-bg:         #0a0f18;
+  --nx-bg-raised:  #0e1422;
+  --nx-bg-surface: #121a2a;
+  --nx-border:     #1a2440;
+  --nx-border-hi:  #243052;
+  --nx-text:       #c8d3e8;
+  --nx-text-dim:   #4e5d7a;
+  --nx-text-muted: #2d3a54;
+  --nx-cyan:       #00e5ff;
+  --nx-green:      #00e676;
+  --nx-yellow:     #ffab00;
+  --nx-red:        #ff3d3d;
+  --nx-pink:       #ff4081;
+  --nx-purple:     #b388ff;
+  --nx-orange:     #ff9100;
+  --nx-blue:       #448aff;
+  --nx-mono: 'JetBrains Mono', 'IBM Plex Mono', monospace;
+  --nx-sans: 'DM Sans', system-ui, sans-serif;
+}
+
+* { 
+  box-sizing: border-box; 
+  margin: 0; 
+  padding: 0; 
+}
+
+html, body { 
+  height: 100%; 
+  overflow: hidden; 
+  background: var(--nx-bg-deep);
+  color: var(--nx-text);
+  font-family: var(--nx-sans);
+  font-size: 13px;
+}
+
+/* ═══ LAYOUT ═══ */
+.layout {
+  display: flex;
+  height: 100vh;
+}
+
+.agent-sidebar {
+  width: 280px;
+  background: var(--nx-bg);
+  border-right: 1px solid var(--nx-border);
+  display: flex;
+  flex-direction: column;
+  min-width: 240px;
+  max-width: 400px;
+  resize: horizontal;
+  overflow: auto;
+}
+
+.chat-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* ═══ AGENT SIDEBAR ═══ */
+.sidebar-header {
+  padding: 12px;
+  border-bottom: 1px solid var(--nx-border);
+  background: var(--nx-bg-raised);
+}
+
+.sidebar-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--nx-text);
+  margin-bottom: 8px;
+}
+
+.add-agent-btn {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--nx-green);
+  color: var(--nx-bg-deep);
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.add-agent-btn:hover {
+  background: var(--nx-cyan);
+  transform: translateY(-1px);
+}
+
+.agent-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.agent-item {
+  padding: 10px;
+  margin: 4px 0;
+  background: var(--nx-bg-surface);
+  border: 1px solid var(--nx-border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+}
+
+.agent-item:hover {
+  background: var(--nx-bg-raised);
+  border-color: var(--nx-border-hi);
+}
+
+.agent-item.active {
+  border-color: var(--nx-cyan);
+  background: rgba(0, 229, 255, 0.1);
+}
+
+.agent-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.agent-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--nx-text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.agent-status {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--nx-text-dim);
+}
+
+.agent-status.connected { background: var(--nx-green); }
+.agent-status.thinking { background: var(--nx-yellow); }
+.agent-status.error { background: var(--nx-red); }
+
+.agent-task {
+  font-size: 11px;
+  color: var(--nx-text-dim);
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.agent-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 18px;
+  height: 18px;
+  background: var(--nx-red);
+  color: white;
+  border: none;
+  border-radius: 50%;
+  font-size: 10px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.agent-item:hover .agent-remove {
+  opacity: 1;
+}
+
+/* ═══ CHAT AREA ═══ */
+.chat-header {
+  padding: 12px 16px;
+  background: var(--nx-bg-raised);
+  border-bottom: 1px solid var(--nx-border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.current-agent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.chat-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.control-btn {
+  padding: 6px 12px;
+  background: var(--nx-bg-surface);
+  border: 1px solid var(--nx-border);
+  color: var(--nx-text);
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.control-btn:hover {
+  background: var(--nx-bg-raised);
+  border-color: var(--nx-border-hi);
+}
+
+/* ═══ PERFORMANCE OPTIMIZATIONS ═══ */
+.chat-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  /* Force GPU layer for smooth operations */
+  transform: translateZ(0);
+  will-change: scroll-position;
+  /* Optimize scrolling on touch devices */
+  overflow-scrolling: touch;
+  -webkit-overflow-scrolling: touch;
+  /* Use hardware acceleration */
+  backface-visibility: hidden;
+  perspective: 1000px;
+}
+
+.message {
+  margin-bottom: 16px;
+  /* Optimize for animations */
+  will-change: transform, opacity;
+  /* Prevent layout thrashing */
+  transform: translateZ(0);
+  /* Smooth appear animation */
+  animation: messageAppear 150ms ease-out;
+}
+
+.message.no-animation,
+.chat-container.streaming .message {
+  animation: none;
+}
+
+.message-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.message-sender {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--nx-cyan);
+}
+
+.message-time {
+  font-size: 11px;
+  color: var(--nx-text-dim);
+}
+
+.message-content {
+  color: var(--nx-text);
+  line-height: 1.5;
+  word-wrap: break-word;
+}
+
+.message.user .message-sender {
+  color: var(--nx-green);
+}
+
+.message.assistant .message-sender {
+  color: var(--nx-purple);
+}
+
+/* ═══ INPUT ═══ */
+.chat-input-area {
+  padding: 16px;
+  background: var(--nx-bg-raised);
+  border-top: 1px solid var(--nx-border);
+}
+
+.input-container {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.chat-input {
+  flex: 1;
+  min-height: 40px;
+  max-height: 120px;
+  padding: 10px 12px;
+  background: var(--nx-bg-surface);
+  border: 1px solid var(--nx-border);
+  border-radius: 6px;
+  color: var(--nx-text);
+  font-family: var(--nx-sans);
+  font-size: 13px;
+  resize: vertical;
+  transition: border-color 0.2s;
+}
+
+.chat-input:focus {
+  outline: none;
+  border-color: var(--nx-cyan);
+}
+
+.send-btn {
+  padding: 10px 16px;
+  background: var(--nx-cyan);
+  color: var(--nx-bg-deep);
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.send-btn:hover {
+  background: var(--nx-blue);
+  transform: translateY(-1px);
+}
+
+.send-btn:disabled {
+  background: var(--nx-text-dim);
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* ═══ ANIMATIONS ═══ */
+@keyframes messageAppear {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ═══ MODAL ═══ */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: none;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.modal-overlay.active {
+  display: flex;
+}
+
+.modal {
+  background: var(--nx-bg);
+  border: 1px solid var(--nx-border);
+  border-radius: 8px;
+  padding: 24px;
+  max-width: 500px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.modal-header {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  color: var(--nx-text);
+}
+
+.modal-input {
+  width: 100%;
+  padding: 12px;
+  background: var(--nx-bg-surface);
+  border: 1px solid var(--nx-border);
+  border-radius: 6px;
+  color: var(--nx-text);
+  font-family: var(--nx-sans);
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.modal-input:focus {
+  outline: none;
+  border-color: var(--nx-cyan);
+}
+
+.modal-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+
+.modal-btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.modal-btn.primary {
+  background: var(--nx-cyan);
+  color: var(--nx-bg-deep);
+}
+
+.modal-btn.secondary {
+  background: var(--nx-bg-surface);
+  color: var(--nx-text);
+  border: 1px solid var(--nx-border);
+}
+
+.modal-btn:hover {
+  transform: translateY(-1px);
+}
+
+/* ═══ RESPONSIVE ═══ */
+@media (max-width: 768px) {
+  .agent-sidebar {
+    width: 240px;
+  }
+}
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <!-- Agent Sidebar -->
+  <div class="agent-sidebar">
+    <div class="sidebar-header">
+      <div class="sidebar-title">Active Agents</div>
+      <button class="add-agent-btn" onclick="openAddAgentModal()">
+        + Spawn New Agent
+      </button>
+    </div>
+    <div class="agent-list" id="agentList">
+      <!-- Agents will be populated here -->
+    </div>
+  </div>
+
+  <!-- Chat Area -->
+  <div class="chat-area">
+    <div class="chat-header">
+      <div class="current-agent" id="currentAgent">
+        <span class="agent-status connected"></span>
+        Select an agent to begin chatting
+      </div>
+      <div class="chat-controls">
+        <button class="control-btn" onclick="exportChat()">Export</button>
+        <button class="control-btn" onclick="clearChat()">Clear</button>
+        <button class="control-btn" onclick="openSettings()">Settings</button>
+      </div>
+    </div>
+
+    <div class="chat-container" id="chatContainer">
+      <div class="message assistant">
+        <div class="message-header">
+          <div class="message-sender">System</div>
+          <div class="message-time">Now</div>
+        </div>
+        <div class="message-content">
+          Welcome to Nexus Enhanced! Click "Spawn New Agent" to add agents and start chatting.
+        </div>
+      </div>
+    </div>
+
+    <div class="chat-input-area">
+      <div class="input-container">
+        <textarea 
+          class="chat-input" 
+          id="chatInput" 
+          placeholder="Type your message..."
+          rows="2"
+          disabled
+        ></textarea>
+        <button class="send-btn" id="sendBtn" onclick="sendMessage()" disabled>
+          Send
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Add Agent Modal -->
+<div class="modal-overlay" id="addAgentModal">
+  <div class="modal">
+    <div class="modal-header">Spawn New Agent</div>
+    <input type="text" class="modal-input" id="agentIdInput" placeholder="Agent ID (e.g., jarvis, aria, atlas)">
+    <input type="text" class="modal-input" id="taskInput" placeholder="Initial task/context">
+    <select class="modal-input" id="modelSelect">
+      <option value="">Default Model</option>
+      <option value="sonnet">Claude Sonnet</option>
+      <option value="opus">Claude Opus</option>
+    </select>
+    <div class="modal-actions">
+      <button class="modal-btn secondary" onclick="closeAddAgentModal()">Cancel</button>
+      <button class="modal-btn primary" onclick="spawnAgent()">Spawn Agent</button>
+    </div>
+  </div>
+</div>
+
+<script>
+class NexusEnhanced {
+  constructor() {
+    this.agents = new Map();
+    this.currentAgentId = null;
+    this.messageHistory = new Map();
+    this.ws = null;
+    this.connectionState = 'disconnected';
+    
+    // Performance optimizations
+    this.messagePool = [];
+    this.maxPoolSize = 100;
+    
+    this.initializeWebSocket();
+    this.setupKeyboardShortcuts();
+    this.loadExistingAgents();
+  }
+
+  // ═══ AGENT MANAGEMENT ═══
+  
+  async spawnAgent(agentId, task, model) {
+    try {
+      const response = await fetch('/api/sessions/spawn', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agentId,
+          task: task || `Hello, I'm ${agentId}`,
+          model: model || undefined,
+          cleanup: 'keep'
+        })
+      });
+      
+      if (!response.ok) throw new Error(`Failed to spawn agent: ${response.statusText}`);
+      
+      const result = await response.json();
+      console.log('Agent spawn result:', result);
+      
+      // Add agent to our local list
+      this.addAgent({
+        id: agentId,
+        name: agentId.charAt(0).toUpperCase() + agentId.slice(1),
+        emoji: this.getAgentEmoji(agentId),
+        status: 'connected',
+        task: task || 'Ready'
+      });
+      
+      this.showToast(`Agent ${agentId} spawned successfully`, 'success');
+      return true;
+    } catch (error) {
+      console.error('Error spawning agent:', error);
+      this.showToast(`Failed to spawn agent: ${error.message}`, 'error');
+      return false;
+    }
+  }
+
+  addAgent(agent) {
+    this.agents.set(agent.id, agent);
+    this.messageHistory.set(agent.id, []);
+    this.renderAgentList();
+  }
+
+  removeAgent(agentId) {
+    if (this.currentAgentId === agentId) {
+      this.currentAgentId = null;
+      this.updateChatHeader();
+      this.clearChatDisplay();
+    }
+    this.agents.delete(agentId);
+    this.messageHistory.delete(agentId);
+    this.renderAgentList();
+  }
+
+  selectAgent(agentId) {
+    this.currentAgentId = agentId;
+    this.updateChatHeader();
+    this.loadChatHistory(agentId);
+    this.enableChatInput();
+  }
+
+  // ═══ UI RENDERING ═══
+  
+  renderAgentList() {
+    const container = document.getElementById('agentList');
+    container.innerHTML = '';
+    
+    this.agents.forEach((agent, id) => {
+      const div = document.createElement('div');
+      div.className = `agent-item ${this.currentAgentId === id ? 'active' : ''}`;
+      div.onclick = () => this.selectAgent(id);
+      
+      div.innerHTML = `
+        <div class="agent-header">
+          <div class="agent-name">
+            <span>${agent.emoji}</span>
+            <span>${agent.name}</span>
+          </div>
+          <div class="agent-status ${agent.status}"></div>
+        </div>
+        <div class="agent-task">${agent.task}</div>
+        <button class="agent-remove" onclick="event.stopPropagation(); nexus.removeAgent('${id}')" title="Remove agent">×</button>
+      `;
+      
+      container.appendChild(div);
+    });
+  }
+
+  updateChatHeader() {
+    const header = document.getElementById('currentAgent');
+    if (this.currentAgentId) {
+      const agent = this.agents.get(this.currentAgentId);
+      header.innerHTML = `
+        <span class="agent-status ${agent.status}"></span>
+        ${agent.emoji} ${agent.name}
+      `;
+    } else {
+      header.innerHTML = `
+        <span class="agent-status"></span>
+        Select an agent to begin chatting
+      `;
+    }
+  }
+
+  // ═══ MESSAGING ═══
+  
+  async sendMessage() {
+    const input = document.getElementById('chatInput');
+    const message = input.value.trim();
+    
+    if (!message || !this.currentAgentId) return;
+    
+    // Add user message to history
+    this.addMessageToHistory(this.currentAgentId, {
+      role: 'user',
+      content: message,
+      timestamp: new Date()
+    });
+    
+    // Clear input
+    input.value = '';
+    
+    // Send to agent
+    try {
+      const response = await fetch('/api/sessions/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agentId: this.currentAgentId,
+          message: message
+        })
+      });
+      
+      if (!response.ok) throw new Error(`Failed to send message: ${response.statusText}`);
+      
+      // Response will come via WebSocket
+    } catch (error) {
+      console.error('Error sending message:', error);
+      this.showToast(`Failed to send message: ${error.message}`, 'error');
+    }
+  }
+
+  addMessageToHistory(agentId, message) {
+    if (!this.messageHistory.has(agentId)) {
+      this.messageHistory.set(agentId, []);
+    }
+    
+    this.messageHistory.get(agentId).push(message);
+    
+    // Update display if this is the current agent
+    if (agentId === this.currentAgentId) {
+      this.renderMessage(message);
+      this.scrollToBottom();
+    }
+  }
+
+  renderMessage(message) {
+    const container = document.getElementById('chatContainer');
+    const div = document.createElement('div');
+    div.className = `message ${message.role}`;
+    
+    const timeStr = message.timestamp.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+    
+    div.innerHTML = `
+      <div class="message-header">
+        <div class="message-sender">${message.role === 'user' ? 'You' : 'Agent'}</div>
+        <div class="message-time">${timeStr}</div>
+      </div>
+      <div class="message-content">${this.escapeHtml(message.content)}</div>
+    `;
+    
+    container.appendChild(div);
+  }
+
+  loadChatHistory(agentId) {
+    const container = document.getElementById('chatContainer');
+    container.innerHTML = '';
+    
+    const history = this.messageHistory.get(agentId) || [];
+    history.forEach(message => this.renderMessage(message));
+    this.scrollToBottom();
+  }
+
+  clearChatDisplay() {
+    document.getElementById('chatContainer').innerHTML = '';
+  }
+
+  // ═══ WEBSOCKET ═══
+  
+  initializeWebSocket() {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/api/synapse/ws`;
+    
+    this.ws = new WebSocket(wsUrl);
+    
+    this.ws.onopen = () => {
+      console.log('WebSocket connected');
+      this.connectionState = 'connected';
+    };
+    
+    this.ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        this.handleWebSocketMessage(data);
+      } catch (error) {
+        console.error('Error parsing WebSocket message:', error);
+      }
+    };
+    
+    this.ws.onclose = () => {
+      console.log('WebSocket disconnected');
+      this.connectionState = 'disconnected';
+      // Attempt to reconnect after 3 seconds
+      setTimeout(() => this.initializeWebSocket(), 3000);
+    };
+    
+    this.ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+  }
+
+  handleWebSocketMessage(data) {
+    // Handle incoming agent messages
+    if (data.type === 'agent_message' && data.agentId && data.content) {
+      this.addMessageToHistory(data.agentId, {
+        role: 'assistant',
+        content: data.content,
+        timestamp: new Date()
+      });
+      
+      // Update agent status
+      const agent = this.agents.get(data.agentId);
+      if (agent) {
+        agent.status = 'connected';
+        agent.task = 'Ready';
+        this.renderAgentList();
+      }
+    }
+  }
+
+  // ═══ UTILITIES ═══
+  
+  enableChatInput() {
+    const input = document.getElementById('chatInput');
+    const btn = document.getElementById('sendBtn');
+    input.disabled = false;
+    btn.disabled = false;
+    input.focus();
+  }
+
+  scrollToBottom() {
+    const container = document.getElementById('chatContainer');
+    container.scrollTop = container.scrollHeight;
+  }
+
+  escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  getAgentEmoji(agentId) {
+    const emojiMap = {
+      jarvis: '🎩', atlas: '🏛️', aria: '🔬', peter: '📈',
+      watson: '🩺', elon: '🚀', dewey: '📚', ares: '🛡️',
+      willb: '🏢', jc: '🧪', xavier: '🎯', xena: '🔭',
+      xander: '🤝', xyla: '🔧', ximena: '📞', xerxes: '💰', xeno: '⚔️'
+    };
+    return emojiMap[agentId] || '🤖';
+  }
+
+  setupKeyboardShortcuts() {
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey && document.activeElement.id === 'chatInput') {
+        e.preventDefault();
+        this.sendMessage();
+      }
+      if (e.key === 'Escape') {
+        this.closeAllModals();
+      }
+    });
+  }
+
+  async loadExistingAgents() {
+    try {
+      const response = await fetch('/api/sessions/list');
+      if (response.ok) {
+        const sessions = await response.json();
+        sessions.forEach(session => {
+          if (session.agentId && session.agentId !== 'atlas') { // Don't include self
+            this.addAgent({
+              id: session.agentId,
+              name: session.agentId.charAt(0).toUpperCase() + session.agentId.slice(1),
+              emoji: this.getAgentEmoji(session.agentId),
+              status: 'connected',
+              task: session.lastMessage?.substring(0, 50) + '...' || 'Active'
+            });
+          }
+        });
+      }
+    } catch (error) {
+      console.log('Could not load existing agents:', error);
+    }
+  }
+
+  showToast(message, type) {
+    // Simple toast notification
+    const toast = document.createElement('div');
+    toast.style.cssText = `
+      position: fixed; top: 20px; right: 20px; z-index: 2000;
+      padding: 12px 16px; border-radius: 6px; font-size: 13px;
+      background: var(--nx-bg-surface); border: 1px solid var(--nx-border);
+      color: var(--nx-text); transition: all 0.3s;
+    `;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      setTimeout(() => document.body.removeChild(toast), 300);
+    }, 3000);
+  }
+
+  closeAllModals() {
+    document.querySelectorAll('.modal-overlay').forEach(modal => {
+      modal.classList.remove('active');
+    });
+  }
+
+  // ═══ EXPORTS FOR GLOBAL ACCESS ═══
+  exportChat() { console.log('Export functionality to be implemented'); }
+  clearChat() { this.clearChatDisplay(); }
+  openSettings() { console.log('Settings functionality to be implemented'); }
+}
+
+// ═══ MODAL FUNCTIONS ═══
+function openAddAgentModal() {
+  document.getElementById('addAgentModal').classList.add('active');
+  document.getElementById('agentIdInput').focus();
+}
+
+function closeAddAgentModal() {
+  document.getElementById('addAgentModal').classList.remove('active');
+  // Clear inputs
+  document.getElementById('agentIdInput').value = '';
+  document.getElementById('taskInput').value = '';
+  document.getElementById('modelSelect').value = '';
+}
+
+async function spawnAgent() {
+  const agentId = document.getElementById('agentIdInput').value.trim();
+  const task = document.getElementById('taskInput').value.trim();
+  const model = document.getElementById('modelSelect').value;
+  
+  if (!agentId) {
+    alert('Please enter an agent ID');
+    return;
+  }
+  
+  const success = await nexus.spawnAgent(agentId, task, model);
+  if (success) {
+    closeAddAgentModal();
+  }
+}
+
+// ═══ INITIALIZATION ═══
+const nexus = new NexusEnhanced();
+
+console.log('Nexus Enhanced initialized');
+</script>
+
+</body>
+</html>

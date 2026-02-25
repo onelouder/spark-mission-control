@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="/static/favicon.png">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <title>Mission Control - Briefing</title>
+    <link rel="stylesheet" href="/static/ide-noir.css">
+    <link rel="stylesheet" href="/static/mission-control.css">
+    <link rel="stylesheet" href="/static/briefing-v2.css">
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <nav class="nav-bar">
+        <div class="nav-container">
+            <div class="nav-left">
+                <span class="nav-title">Mission Control</span>
+                <div class="nav-tabs">
+                    <a href="/" class="nav-tab">Kanban</a>
+                    <a href="/briefing" class="nav-tab active">Briefing</a>
+                    <a href="/email" class="nav-tab">Email</a>
+                    <a href="/queue" class="nav-tab">Queue</a>
+                    <a href="/crm" class="nav-tab">CRM</a>
+                    <a href="/synapse" class="nav-tab">Synapse</a>
+                    <a href="/activity" class="nav-tab">Activity</a>
+                    <a href="/rbot" class="nav-tab">Research</a>
+                    <a href="/atlas" class="nav-tab">Atlas</a>
+                    <a href="https://jarvis.jwells.net/activity" class="nav-tab" target="_blank">Jarvis</a>
+                </div>
+            </div>
+            <div class="nav-center">
+                <div class="filter-group">
+                    <select id="context-filter" class="filter-select" title="Filter by context">
+                        <option value="">All Contexts</option>
+                    </select>
+                    <select id="account-filter" class="filter-select" title="Filter by account">
+                        <option value="">All Accounts</option>
+                    </select>
+                </div>
+            </div>
+            <div class="nav-right">
+                <button id="refresh-btn" class="btn" title="Refresh">Sync</button>
+                <span id="last-updated" class="refresh-status">--</span>
+                <span id="cached-indicator" class="cached-badge" style="display: none;">cached</span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Briefing Content -->
+    <main class="briefing-main">
+        <!-- Loading State -->
+        <div id="loading-state" class="loading-state">
+            <div class="loading-spinner"></div>
+            <p>Generating briefing...</p>
+        </div>
+
+        <!-- Error State -->
+        <div id="error-state" class="error-state hidden">
+            <p>Failed to load briefing data</p>
+            <button id="retry-btn" class="btn btn-secondary">Retry</button>
+        </div>
+
+        <!-- Briefing Blocks Container -->
+        <div id="briefing-container" class="briefing-container hidden">
+            
+            <!-- Focus Mode Banner (shown when in Focus/Deep Work block) -->
+            <div id="focus-mode-banner" class="focus-mode-banner">
+                <span class="focus-icon">🎯</span>
+                <div class="focus-content">
+                    <div class="focus-title" id="focus-title">Focus Time</div>
+                    <div class="focus-subtitle" id="focus-subtitle">Protect this time — stay in the zone</div>
+                </div>
+                <div class="focus-time-remaining" id="focus-time-remaining">--:-- left</div>
+            </div>
+            
+            <!-- Breathing popup moved to end of body -->
+
+            <!-- AI Morning Summary Widget -->
+            <div id="morning-summary-block" class="morning-summary-block">
+                <div class="morning-summary-header">
+                    <span class="morning-icon">☀️</span>
+                    <span class="morning-title">Good Morning</span>
+                    <span class="morning-time" id="morning-time"></span>
+                    <button class="morning-refresh" onclick="loadMorningSummary(true)" title="Regenerate">↻</button>
+                </div>
+                <div class="morning-summary-content" id="morning-summary-content">
+                    <span class="loading-dots">Loading summary...</span>
+                </div>
+            </div>
+            
+            <!-- Upcoming Meetings Widget -->
+            <div id="upcoming-meetings-block" class="upcoming-meetings-block">
+                <div class="meetings-header">
+                    <span class="meetings-icon">📅</span>
+                    <span class="meetings-title">Today's Schedule</span>
+                    <span class="meetings-count" id="meetings-count">0</span>
+                    <button class="meetings-refresh" onclick="loadUpcomingMeetings()" title="Refresh">↻</button>
+                </div>
+                <div class="meetings-list" id="meetings-list">
+                    <span class="loading-dots">Loading...</span>
+                </div>
+            </div>
+            
+            <!-- Weekend Preview Widget (shown Fri-Sun) -->
+            <div id="weekend-preview-block" class="weekend-preview-block" style="display: none;">
+                <div class="weekend-header">
+                    <span class="weekend-icon">🌅</span>
+                    <span class="weekend-title">Weekend Preview</span>
+                    <button class="weekend-refresh" onclick="loadWeekendPreview()" title="Refresh">↻</button>
+                </div>
+                <div class="weekend-days">
+                    <div class="weekend-day" id="weekend-saturday">
+                        <div class="weekend-day-label" id="saturday-label">Saturday</div>
+                        <div class="weekend-day-events" id="saturday-events">
+                            <span class="loading-dots">...</span>
+                        </div>
+                    </div>
+                    <div class="weekend-day" id="weekend-sunday">
+                        <div class="weekend-day-label" id="sunday-label">Sunday</div>
+                        <div class="weekend-day-events" id="sunday-events">
+                            <span class="loading-dots">...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- CRM Activity Widget -->
+            <div id="crm-activity-block" class="crm-activity-block">
+                <div class="crm-header">
+                    <span class="crm-icon">🏢</span>
+                    <span class="crm-title-text">CRM</span>
+                    <button class="crm-refresh" onclick="loadCrmActivity()" title="Refresh">↻</button>
+                    <a href="/crm" class="crm-open-link" title="Open CRM">↗</a>
+                </div>
+                <div id="crm-activity">
+                    <span class="loading-dots">Loading...</span>
+                </div>
+            </div>
+            
+            <!-- Block 1: Decisions Waiting on You (Always Expanded) -->
+            <section class="briefing-block" id="decisions-block">
+                <div class="block-header critical">
+                    <div class="block-title-row">
+                        <span class="block-fold-arrow">▾</span>
+                        <h2 class="block-title">DECISIONS WAITING ON YOU</h2>
+                        <span class="block-count">0</span>
+                    </div>
+                </div>
+                <div class="block-content" id="decisions-content">
+                    <div class="empty-state">No pending decisions</div>
+                </div>
+            </section>
+
+            <!-- Block 2: Today's Runway -->
+            <section class="briefing-block" id="runway-block">
+                <div class="block-header" onclick="toggleBlock('runway')">
+                    <div class="block-title-row">
+                        <span class="block-fold-arrow">▾</span>
+                        <h2 class="block-title">TODAY'S RUNWAY</h2>
+                        <span class="block-count">0</span>
+                        <span class="next-event-inline" id="next-event-display">
+                            <span class="next-event-label">— Next:</span>
+                            <span class="next-event-name" id="next-event-name">—</span>
+                            <span class="next-event-time" id="next-event-time"></span>
+                        </span>
+                        <a class="quick-reset-link" href="#" onclick="event.stopPropagation(); openBreathingPopup();" title="Quick Reset">Quick Reset</a>
+                    </div>
+                </div>
+                <div class="block-content" id="runway-content">
+                    <div class="timeline-container">
+                        <div class="current-time-marker">
+                            <span id="current-time">12:30 PM</span>
+                            <div class="time-line"></div>
+                        </div>
+                        <div class="runway-items" id="runway-items">
+                            <div class="empty-state">No items for today</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Block: Agent Status -->
+            <section class="briefing-block" id="agents-block">
+                <div class="block-header" onclick="toggleBlock('agents')">
+                    <div class="block-title-row">
+                        <span class="block-fold-arrow">▾</span>
+                        <h2 class="block-title">AGENT CONSTELLATION</h2>
+                        <span class="block-count" id="agents-count">0</span>
+                    </div>
+                </div>
+                <div class="block-content" id="agents-content">
+                    <div class="agents-grid">
+                        <div class="empty-state">Loading agents...</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Block: System Health -->
+            <section class="briefing-block health-block" id="health-block">
+                <div class="block-header health-header">
+                    <div class="block-title-row">
+                        <span class="health-summary" id="health-summary">Checking services...</span>
+                        <div class="health-indicators" id="health-indicators">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Block: System Metrics -->
+            <section class="briefing-block metrics-block" id="metrics-block">
+                <div class="block-header metrics-header">
+                    <div class="block-title-row">
+                        <span class="metrics-icon">📊</span>
+                        <span class="metrics-title">System Resources</span>
+                        <span class="metrics-uptime" id="metrics-uptime"></span>
+                        <div class="metrics-bars" id="metrics-bars">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Block: Quick Notes -->
+            <section class="briefing-block notes-block" id="notes-block">
+                <div class="block-header notes-header" onclick="toggleBlock('notes')">
+                    <div class="block-title-row">
+                        <span class="block-fold-arrow">▾</span>
+                        <h2 class="block-title">QUICK NOTES</h2>
+                        <span class="notes-status" id="notes-status"></span>
+                    </div>
+                </div>
+                <div class="block-content" id="notes-content">
+                    <textarea id="quick-notes-textarea" 
+                              class="quick-notes-input" 
+                              placeholder="Jot down quick thoughts, todos, or context..."
+                              rows="4"></textarea>
+                </div>
+            </section>
+
+            <!-- Block: Task Queue Summary -->
+            <section class="briefing-block queue-summary-block" id="queue-summary-block">
+                <div class="block-header queue-summary-header">
+                    <div class="block-title-row">
+                        <span class="queue-icon">📋</span>
+                        <span class="queue-summary-text" id="queue-summary-text">Loading tasks...</span>
+                        <div class="queue-counts" id="queue-counts">
+                            <!-- Populated by JS -->
+                        </div>
+                        <a href="/queue" class="queue-link" title="Open Task Queue">→</a>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Accomplishments Today Widget -->
+            <section class="briefing-block accomplishments-block" id="accomplishments-block">
+                <div class="block-header accomplishments-header">
+                    <div class="block-title-row">
+                        <span class="accomplishments-icon">🏆</span>
+                        <span class="accomplishments-title">Today's Wins</span>
+                        <span class="accomplishments-count" id="accomplishments-count">0</span>
+                        <button class="accomplishments-add-btn" onclick="showAccomplishmentInput()" title="Add win">+</button>
+                    </div>
+                </div>
+                <div class="accomplishments-input-row" id="accomplishments-input-row" style="display: none;">
+                    <input type="text" id="accomplishment-input" class="accomplishment-input" placeholder="What did you accomplish?" onkeypress="handleAccomplishmentKeypress(event)">
+                    <button class="accomplishment-save-btn" onclick="saveAccomplishment()">Save</button>
+                </div>
+                <div class="accomplishments-list" id="accomplishments-list">
+                    <!-- Populated by JS -->
+                </div>
+            </section>
+
+            <!-- Email Quick Glance Widget -->
+            <section class="briefing-block email-glance-block" id="email-glance-block">
+                <div class="block-header email-glance-header">
+                    <div class="block-title-row">
+                        <span class="email-glance-icon">📬</span>
+                        <span class="email-glance-title">Email Inbox</span>
+                        <span class="email-glance-badge" id="email-unsorted-count">0</span>
+                        <a href="/email" class="email-glance-link" title="Go to Email">→</a>
+                    </div>
+                </div>
+                <div class="email-glance-content" id="email-glance-content">
+                    <div class="email-glance-loading">Loading...</div>
+                </div>
+            </section>
+
+            <!-- Quick Links Widget -->
+            <section class="briefing-block quick-links-block" id="quick-links-block">
+                <div class="block-header quick-links-header">
+                    <div class="block-title-row">
+                        <span class="quick-links-icon">🔗</span>
+                        <span class="quick-links-title">Quick Access</span>
+                    </div>
+                </div>
+                <div class="quick-links-grid">
+                    <a href="/synapse" class="quick-link-item">
+                        <span class="ql-icon">🤖</span>
+                        <span class="ql-label">Synapse</span>
+                    </a>
+                    <a href="/email" class="quick-link-item">
+                        <span class="ql-icon">📧</span>
+                        <span class="ql-label">Email</span>
+                    </a>
+                    <a href="/queue" class="quick-link-item">
+                        <span class="ql-icon">📋</span>
+                        <span class="ql-label">Queue</span>
+                    </a>
+                    <a href="http://ether-spark:18789/webchat" class="quick-link-item" target="_blank">
+                        <span class="ql-icon">💬</span>
+                        <span class="ql-label">Nexus</span>
+                    </a>
+                    <a href="https://outlook.office365.com/calendar" class="quick-link-item" target="_blank">
+                        <span class="ql-icon">📅</span>
+                        <span class="ql-label">Calendar</span>
+                    </a>
+                    <a href="https://mail.google.com" class="quick-link-item" target="_blank">
+                        <span class="ql-icon">✉️</span>
+                        <span class="ql-label">Gmail</span>
+                    </a>
+                    <a href="https://github.com/moltbot" class="quick-link-item" target="_blank">
+                        <span class="ql-icon">🐙</span>
+                        <span class="ql-label">GitHub</span>
+                    </a>
+                    <a href="/" class="quick-link-item">
+                        <span class="ql-icon">📊</span>
+                        <span class="ql-label">Kanban</span>
+                    </a>
+                </div>
+            </section>
+
+            <!-- Git Activity Widget -->
+            <section class="briefing-block git-activity-block" id="git-activity-block">
+                <div class="block-header git-activity-header">
+                    <div class="block-title-row">
+                        <span class="git-activity-icon">⚡</span>
+                        <span class="git-activity-title">Recent Commits</span>
+                        <span class="git-activity-count" id="git-activity-count">0</span>
+                        <button class="git-activity-refresh-btn" onclick="loadGitActivity(true)" title="Refresh">↻</button>
+                    </div>
+                </div>
+                <div class="git-activity-list" id="git-activity-list">
+                    <div class="git-activity-loading">Loading commits...</div>
+                </div>
+            </section>
+
+            <!-- Block 3: Active Threads -->
+            <section class="briefing-block" id="threads-block">
+                <div class="block-header" onclick="toggleBlock('threads')">
+                    <div class="block-title-row">
+                        <span class="block-fold-arrow">▾</span>
+                        <h2 class="block-title">ACTIVE THREADS</h2>
+                        <span class="block-count">0</span>
+                    </div>
+                </div>
+                <div class="block-content" id="threads-content">
+                    <div class="empty-state">No active threads</div>
+                </div>
+            </section>
+
+            <!-- Block 4: Incoming Tasks & Action Items -->
+            <section class="briefing-block" id="people-block">
+                <div class="block-header" onclick="toggleBlock('people')">
+                    <div class="block-title-row">
+                        <span class="block-fold-arrow">▾</span>
+                        <h2 class="block-title">INCOMING TASKS & ACTION ITEMS</h2>
+                        <span class="block-count">0</span>
+                    </div>
+                </div>
+                <div class="block-content" id="people-content">
+                    <div class="empty-state">No incoming items</div>
+                </div>
+            </section>
+
+            <!-- Block 5: This Week's Pulse (stateful - accumulates daily until reset) -->
+            <section class="briefing-block" id="pulse-block">
+                <div class="block-header" onclick="toggleBlock('pulse')">
+                    <div class="block-title-row">
+                        <span class="block-fold-arrow">▾</span>
+                        <h2 class="block-title">THIS WEEK'S PULSE</h2>
+                        <button id="refresh-pulse-btn" class="btn btn-small" onclick="event.stopPropagation(); refreshPulse()">Refresh</button>
+                        <button id="reset-pulse-btn" class="btn btn-small btn-secondary" onclick="event.stopPropagation(); resetPulse()" title="Clear all accumulated entries">Reset Week</button>
+                    </div>
+                </div>
+                <div class="block-content" id="pulse-content">
+                    <div class="pulse-text">
+                        <p>Loading weekly pulse...</p>
+                    </div>
+                    <div class="pulse-meta">
+                        <span id="pulse-generated-at">Generated at: --</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Snoozed Items (Collapsed by Default) -->
+            <section class="briefing-block collapsed" id="snoozed-block">
+                <div class="block-header" onclick="toggleBlock('snoozed')">
+                    <div class="block-title-row">
+                        <span class="block-fold-arrow">▸</span>
+                        <h2 class="block-title">SNOOZED</h2>
+                        <span class="block-count">0</span>
+                    </div>
+                </div>
+                <div class="block-content" id="snoozed-content">
+                    <div class="empty-state">No snoozed items</div>
+                </div>
+            </section>
+
+        </div>
+    </main>
+
+    <!-- Snooze Modal -->
+    <div id="snooze-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Snooze Item</h3>
+                <button class="modal-close" onclick="closeSnoozeModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <p id="snooze-item-title">Snoozing: Item Title</p>
+                <div class="snooze-options">
+                    <button class="snooze-option" data-hours="4">Later today (+4h)</button>
+                    <button class="snooze-option" data-preset="tomorrow">Tomorrow morning</button>
+                    <button class="snooze-option" data-preset="next-week">Next week</button>
+                    <button class="snooze-option" data-days="3">In 3 days</button>
+                    <div class="custom-snooze">
+                        <label>Pick date:</label>
+                        <input type="date" id="custom-snooze-date">
+                        <button class="snooze-option" onclick="snoozeToCustomDate()">Snooze to date</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Item Templates -->
+    <template id="decision-item-template">
+        <div class="decision-item" data-urgency="">
+            <div class="decision-left-border"></div>
+            <div class="decision-content">
+                <div class="decision-header">
+                    <span class="decision-sender">
+                        <span class="sender-name"></span>
+                        <span class="tier-badge"></span>
+                    </span>
+                    <span class="decision-meta">
+                        <span class="decision-date"></span>
+                        <span class="decision-days"></span>
+                    </span>
+                </div>
+                <div class="decision-subject-row">
+                    <div class="decision-subject"></div>
+                    <a class="decision-open-link" href="#" target="_blank" title="Open in Outlook">open msg</a>
+                </div>
+                <div class="decision-summary"></div>
+                <div class="decision-actions">
+                    <button class="action-btn">Reply Draft</button>
+                    <button class="action-btn">Delegate</button>
+                    <button class="action-btn snooze-btn" onclick="openSnoozeModal(this)">Snooze ▾</button>
+                    <button class="action-btn done-btn" onclick="markItemDone(this)">Done</button>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <template id="people-item-template">
+        <div class="people-item">
+            <div class="people-content">
+                <div class="people-header">
+                    <span class="people-name">
+                        <span class="contact-name"></span>
+                        <span class="tier-badge"></span>
+                    </span>
+                    <span class="people-days"></span>
+                </div>
+                <div class="people-subject"></div>
+                <div class="people-action"></div>
+                <div class="people-actions-inline">
+                    <a href="#" class="action-link" onclick="openSnoozeModal(this); return false;">Snooze</a>
+                    <span class="action-sep">·</span>
+                    <a href="#" class="action-link done-link" onclick="markItemDone(this); return false;">Handled</a>
+                    <span class="action-sep">·</span>
+                    <a href="#" class="action-link open-link" target="_blank">Open</a>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <template id="thread-item-template">
+        <div class="thread-item">
+            <div class="thread-content">
+                <div class="thread-header">
+                    <h4 class="thread-title"></h4>
+                    <span class="thread-days"></span>
+                </div>
+                <div class="thread-participants"></div>
+                <div class="thread-status"></div>
+                <div class="thread-next-action"></div>
+                <div class="thread-actions">
+                    <button class="action-btn snooze-btn" onclick="openSnoozeModal(this)">Snooze ▾</button>
+                    <button class="action-btn done-btn" onclick="markItemDone(this)">Done!</button>
+                    <button class="action-btn archive-btn" onclick="archiveItem(this)">Archive</button>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <template id="stale-item-template">
+        <div class="stale-item">
+            <div class="stale-content">
+                <div class="stale-header">
+                    <span class="stale-title"></span>
+                    <span class="stale-days"></span>
+                </div>
+                <div class="stale-source"></div>
+                <div class="stale-actions-inline">
+                    <a href="#" class="action-link" onclick="openSnoozeModal(this); return false;">Snooze</a>
+                    <span class="action-sep">·</span>
+                    <a href="#" class="action-link done-link" onclick="markItemDone(this); return false;">Done</a>
+                    <span class="action-sep">·</span>
+                    <a href="#" class="action-link" onclick="archiveItem(this); return false;">Archive</a>
+                    <span class="action-sep">·</span>
+                    <a href="#" class="action-link open-link" target="_blank">Open</a>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <template id="runway-item-template">
+        <div class="runway-item">
+            <div class="runway-time"></div>
+            <div class="runway-content">
+                <div class="runway-title"></div>
+                <div class="runway-details"></div>
+            </div>
+        </div>
+    </template>
+
+    <script src="/static/briefing-v2.js"></script>
+<!-- Breathing Exercise Popup (fixed overlay, hidden until triggered) -->
+<div class="breathing-popup-overlay" id="breathing-popup-overlay" onclick="closeBreathingPopup(event)">
+    <div class="breathing-popup" onclick="event.stopPropagation()">
+        <div class="breathing-popup-header">
+            <span class="breathing-title">Quick Reset</span>
+            <button class="breathing-popup-close" onclick="closeBreathingPopup()">&times;</button>
+        </div>
+        <div class="breathing-display">
+            <div class="breathing-circle" id="breathing-circle">
+                <div class="breathing-text" id="breathing-text">Ready</div>
+                <div class="breathing-timer" id="breathing-timer"></div>
+            </div>
+            <div class="breathing-controls">
+                <button class="breathing-btn primary" id="breathing-start" onclick="toggleBreathing()">Start</button>
+                <select class="breathing-select" id="breathing-pattern" onchange="setBreathingPattern()">
+                    <option value="box">Box Breathing (4-4-4-4)</option>
+                    <option value="478">4-7-8 Relaxing</option>
+                    <option value="quick">Quick Focus (4-2-4)</option>
+                </select>
+            </div>
+        </div>
+        <div class="breathing-hint">1-minute cognitive reset between intense tasks</div>
+    </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,1000 @@
+V1 Cron/Agent Control Panel (no reviewers) — expanded, with task acquisition telemetry
+0) V1 constraints + goals
+
+10 agents, 24/7
+
+Run interval per agent: 00:10 → 24:00 (10 min to 24 hours)
+
+No reviewer lane/agents (so quality gates must be automatic + “safe posting” defaults)
+
+Kanban is system-of-record for tasks; agents claim work, update tasks, attach artifacts, post Discord notifications.
+
+1) V1 UI: three screens
+A) “Fleet” (single pane of glass)
+
+Per-agent row columns
+
+Agent: name, role tag (BD / research / ops / admin)
+
+Status: IDLE | RUNNING | BACKOFF | PAUSED | DEGRADED
+
+Interval: every 10m/30m/6h/24h + next-run timestamp
+
+Current claim: task_id, lane, priority, age-in-progress
+
+Telemetry: jobs/day, success %, avg runtime, p95 runtime
+
+Acquisition: claim attempts, claim success %, claim conflicts, releases
+
+Stuck: stuck count, auto-release count, handoffs count
+
+Errors: last error class, last error time
+
+Budget: $/day, tokens/day, 429 rate
+
+Heartbeat: last heartbeat age
+
+Top bar KPIs
+
+Queue depth by lane/tag
+
+“Oldest unclaimed task” age
+
+Total tasks in-progress
+
+Total stuck tasks
+
+Claim conflict rate
+
+Discord delivery health
+
+B) “Scheduler & Acquisition” (controls)
+
+Global controls
+
+Interval presets dropdown: 10m, 15m, 30m, 1h, 3h, 6h, 12h, 24h
+
+Global jitter: 0–120s
+
+Global max concurrent claims
+
+Global quiet hours (optional): reduce notifications not execution
+
+Global stuck policy: default N minutes, action order
+
+Per-agent controls
+
+Interval (10m–24h)
+
+Max tasks per run (batch size)
+
+Max runtime per run (hard stop)
+
+Pull strategy config (see below)
+
+Lease/lock TTL
+
+Stuck detection threshold N
+
+Required fields policy (strict/lenient)
+
+Allowed lanes/tags (scope)
+
+Discord routing (channels per agent)
+
+C) “Task details” (one card drill-down)
+
+Shows:
+
+Claim history (who/when/lease TTL)
+
+Last updates (agent step logs)
+
+Required field validation status
+
+Artifact links list + checklist completion
+
+Stuck timer + actions taken (release/hand-off)
+
+Discord notifications emitted
+
+2) Task acquisition telemetry (what you track + expose)
+A) Metrics (per agent, per hour/day)
+
+Claim funnel
+
+claim_attempts
+
+claim_success
+
+claim_conflicts (lost lease race / already locked)
+
+claim_rejected_invalid_fields
+
+claim_rejected_blocked_dependency
+
+claim_rejected_scope (wrong tag/lane/owner)
+
+Time-to-claim
+
+queue_wait_time = first_seen → claimed
+
+candidate_eval_time (time spent scoring/filtering candidates)
+
+Lifecycle
+
+tasks_started
+
+tasks_completed
+
+tasks_released (manual / stuck / TTL expiry)
+
+tasks_handed_off (explicit reassignment)
+
+tasks_abandoned (max retries exceeded)
+
+Stuck
+
+stuck_detected_count
+
+auto_release_count
+
+auto_handoff_count
+
+stuck_mean_time_to_recover
+
+Aging and flow
+
+oldest_unclaimed_age
+
+oldest_in_progress_age
+
+wip_by_lane
+
+Expose these as sparklines and as an “Acquisition” panel.
+
+3) Pull strategy (V1 implementation)
+
+You want three modes: oldest-first, priority-first, downstream blocked avoidance. Implement as a scoring + filter pipeline.
+
+A) Inputs from Kanban task card
+
+Minimum fields you’ll likely have:
+
+created_at, updated_at
+
+lane (Backlog/In Progress/Done)
+
+priority (P0..P3 or numeric)
+
+tags (BD/research/ops/admin; “blocked”; “dependency:task123”)
+
+owner (optional)
+
+acceptance_criteria (text)
+
+links[] (docs/PR/files)
+
+checklist_total, checklist_done
+
+blocked_by[] (explicit, preferred)
+
+blockers_count (derived)
+
+B) Candidate filtering (hard rejects)
+
+Reject if:
+
+Not in allowed lanes/tags for this agent
+
+Already leased/locked by another agent (unless expired)
+
+Missing required fields (policy-dependent)
+
+Blocked (if downstream blocked avoidance is enabled)
+
+C) Scoring (soft ordering)
+
+Define a score (higher wins):
+
+score = wP*priority + wA*age + wU*staleness - wB*blocked_penalty - wR*risk_penalty
+
+Where:
+
+priority: map P0=100, P1=50, P2=20, P3=5
+
+age: time since created (or since entered backlog)
+
+staleness: time since last update (captures neglected items)
+
+blocked_penalty: huge if blocked_by nonempty
+
+risk_penalty: optional in V1 (e.g., tasks requiring external posting)
+
+Mode configs
+
+Oldest-first: wA high, wP low
+
+Priority-first: wP high, wA medium
+
+Downstream blocked avoidance: enforce filter blocked_by empty OR set wB extremely high
+
+D) Tie-breakers
+
+Higher priority
+
+Older created_at
+
+Older updated_at (staler wins)
+
+Deterministic hash(task_id) for stability
+
+4) Lease/lock TTL (prevent double-claim)
+A) Model
+
+A lease is a time-bounded lock:
+
+lease_owner_agent_id
+
+lease_acquired_at
+
+lease_expires_at
+
+lease_token (random UUID to avoid “stale unlock”)
+
+B) Behavior
+
+Acquire: atomic compare-and-set on task card (or DB) only if lease_expires_at < now or empty.
+
+Renew: agent heartbeats “I’m still working” every X minutes, extending expiry.
+
+Release: agent sets lease empty if done or handing off.
+
+Expiry: if agent dies, lease naturally expires → another agent can claim.
+
+C) TTL values (V1 pragmatic)
+
+Since your run intervals go up to 24h, TTL must be independent of schedule.
+
+Default lease TTL: 45–90 minutes
+
+Heartbeat renew: every 5–10 minutes while working
+
+Hard max lease age: e.g., 6 hours unless task explicitly long-running
+
+Expose in UI:
+
+TTL default, renew cadence, max lease age
+
+5) “Stuck detection” → auto-release / hand-off
+A) Define “no updates”
+
+A task is “stuck” if:
+
+Lease exists AND
+
+now - last_task_update_by_agent > N_minutes
+
+“Update” can be:
+
+Kanban comment
+
+checklist tick
+
+artifact link added
+
+status step update
+
+heartbeat “still working” + progress marker (preferred)
+
+B) Actions (V1 simple escalation ladder)
+
+At N minutes stuck:
+
+Ping Discord: “Task T-123 stuck, last progress 47m ago”
+
+After N + grace:
+
+Auto-release lease
+
+Add Kanban comment “Auto-released due to inactivity threshold”
+
+After repeated stuck episodes (count >= K):
+
+Auto-hand-off: move to a “Needs attention” lane/tag; optionally assign to a different agent role
+
+C) Recommended defaults
+
+N = 30–60 min (depends on typical work unit)
+
+grace = 10 min
+
+K = 2 stuck cycles before “Needs attention”
+
+Expose in UI per agent:
+
+stuck threshold N
+
+grace period
+
+max stuck cycles before escalation lane/tag
+
+6) Required fields validation (V1)
+A) Required fields (baseline)
+
+Before claim or before “start work”:
+
+Owner (human or team) OR owner_optional=true if you want agents self-own
+
+Acceptance criteria present (non-empty, min length threshold)
+
+At least one link OR links_optional=true with explicit flag
+
+Output target (where the result goes: doc link, PR repo/path, Discord channel, CRM entry, etc.)
+
+B) Validation outcomes
+
+Hard block: cannot claim; task stays backlog with “Missing fields” reason
+
+Soft claim + request: agent claims but first step is to request missing info (Discord ping + comment), then releases.
+
+V1 recommendation: hard block on missing acceptance criteria + output target. Soft on links.
+
+C) UI surfacing
+
+Column “Valid?” with reasons
+
+Quick filter “invalid tasks”
+
+Button: “Generate missing fields request message” (auto-comment template)
+
+7) Work artifacts tracking (links, outputs, checklists)
+A) Artifact model
+
+Artifacts attach to a task:
+
+type: DOC | PR | FILE | DASHBOARD | MESSAGE | OTHER
+
+url / path
+
+description
+
+created_by_agent
+
+created_at
+
+status: DRAFT | SUBMITTED | MERGED | PUBLISHED | ARCHIVED (optional)
+
+B) Checklist completion %
+
+Track:
+
+checklist_total
+
+checklist_done
+
+completion_pct = done/total
+
+Agents should update checklist as they progress (cheap progress signal; prevents false stuck).
+
+C) Output targets
+
+Each task should declare:
+
+output_target_type: doc_update | pr | kanban_comment | discord_post | crm_update
+
+output_target_ref: link/path/channel
+
+Agents must mark “delivered” with a final artifact/link.
+
+UI:
+
+“Artifacts” panel with link list + statuses
+
+Progress bar from checklist completion %
+
+“Delivered?” boolean + timestamp
+
+8) V1 data you need to store (minimal)
+
+You can implement with either:
+
+Write back into Kanban custom fields (simplest)
+
+or Local Postgres event log + Kanban as display (more robust)
+
+Minimum local tables (if you do Postgres)
+
+agents(agent_id, role, interval_min, enabled, last_heartbeat, status)
+
+tasks(task_id, lane, priority, tags, created_at, updated_at, owner, acceptance_criteria_hash, output_target, checklist_total, checklist_done, blocked_by_count, last_seen)
+
+leases(task_id, agent_id, lease_token, acquired_at, expires_at, last_progress_at)
+
+task_events(id, ts, task_id, agent_id, event_type, payload_json)
+
+acquisition_stats(ts_bucket, agent_id, attempts, success, conflicts, invalid_rejects, blocked_rejects, avg_eval_ms, …)
+
+9) V1 defaults (copy/paste configuration)
+
+Interval presets: 10m, 30m, 1h, 6h, 12h, 24h
+
+Batch size per run: 1–3 tasks
+
+Max runtime per run: 8–20 min (so 10m interval doesn’t stack)
+
+Lease TTL: 60 min
+
+Renew cadence: every 10 min (with progress marker)
+
+Stuck N: 45 min, grace 10 min, K=2 cycles → “Needs attention”
+
+Pull: Priority-first for ops/admin, Oldest-first for research backlog, Blocked avoidance ON everywhere
+
+Required fields: hard block missing acceptance criteria + output target, soft on missing links/owner (comment + release)
+
+If you want the next step: I can give you exact table columns + JSON payloads for task_events and the acquire/renew/release pseudocode (atomic lease semantics) so your coder agent can implement without ambiguity.
+
+Go ahead with the  table columns JSON payloads and pseudocode
+
+Below is a V1-implementable spec: Postgres tables/columns, event JSON payloads, and atomic lease pseudocode (acquire/renew/release + stuck detection + pull strategy). Assumes: Kanban is SoR, but leases + telemetry live in Postgres for atomicity and clean monitoring.
+
+1) Postgres schema (tables + columns)
+1.1 agents
+CREATE TABLE agents (
+  agent_id           TEXT PRIMARY KEY,          -- "AGENT-01"
+  role               TEXT NOT NULL,             -- "research|ops|bd|admin"
+  enabled            BOOLEAN NOT NULL DEFAULT TRUE,
+  status             TEXT NOT NULL DEFAULT 'IDLE',  -- IDLE|RUNNING|BACKOFF|PAUSED|DEGRADED
+  interval_sec       INTEGER NOT NULL,          -- 600..86400
+  jitter_sec         INTEGER NOT NULL DEFAULT 30,
+  max_tasks_per_run  INTEGER NOT NULL DEFAULT 2,
+  max_runtime_sec    INTEGER NOT NULL DEFAULT 900,
+  allowed_tags       TEXT[] NOT NULL DEFAULT '{}',
+  allowed_lanes       TEXT[] NOT NULL DEFAULT '{BACKLOG}',
+
+  pull_mode          TEXT NOT NULL DEFAULT 'PRIORITY_FIRST', -- OLDEST_FIRST|PRIORITY_FIRST
+  avoid_blocked      BOOLEAN NOT NULL DEFAULT TRUE,
+
+  lease_ttl_sec      INTEGER NOT NULL DEFAULT 3600,
+  renew_every_sec    INTEGER NOT NULL DEFAULT 600,
+  max_lease_age_sec  INTEGER NOT NULL DEFAULT 21600,
+
+  stuck_after_sec    INTEGER NOT NULL DEFAULT 2700,  -- N (e.g., 45m)
+  stuck_grace_sec    INTEGER NOT NULL DEFAULT 600,
+  stuck_max_cycles   INTEGER NOT NULL DEFAULT 2,
+
+  require_acceptance BOOLEAN NOT NULL DEFAULT TRUE,
+  require_output_target BOOLEAN NOT NULL DEFAULT TRUE,
+  require_owner       BOOLEAN NOT NULL DEFAULT FALSE,
+  require_links       BOOLEAN NOT NULL DEFAULT FALSE,
+
+  discord_channel    TEXT,                       -- "#ops" or webhook key
+  last_heartbeat_at  TIMESTAMPTZ,
+  last_run_started_at TIMESTAMPTZ,
+  last_run_finished_at TIMESTAMPTZ,
+  last_error_at      TIMESTAMPTZ,
+  last_error_class   TEXT,
+  last_error_msg     TEXT
+);
+
+1.2 tasks_cache (optional but recommended)
+
+Stores snapshot of Kanban fields to enable local scoring/filtering without hammering Kanban API.
+
+CREATE TABLE tasks_cache (
+  task_id            TEXT PRIMARY KEY,  -- "T-104"
+  lane               TEXT NOT NULL,     -- BACKLOG|IN_PROGRESS|DONE|NEEDS_ATTENTION
+  priority           INTEGER NOT NULL DEFAULT 0, -- 0..100 (map P0..P3)
+  tags               TEXT[] NOT NULL DEFAULT '{}',
+  owner              TEXT,
+  acceptance_criteria TEXT,
+  output_target_type TEXT,              -- doc_update|pr|discord_post|...
+  output_target_ref  TEXT,              -- URL/path/channel
+  links              JSONB NOT NULL DEFAULT '[]', -- [{type,url,desc}]
+  checklist_total    INTEGER NOT NULL DEFAULT 0,
+  checklist_done     INTEGER NOT NULL DEFAULT 0,
+  blocked_by         TEXT[] NOT NULL DEFAULT '{}', -- explicit blockers
+  created_at         TIMESTAMPTZ,
+  updated_at         TIMESTAMPTZ,
+  last_seen_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  raw_kanban         JSONB NOT NULL DEFAULT '{}'   -- full snapshot if you want
+);
+
+CREATE INDEX tasks_cache_lane_idx ON tasks_cache(lane);
+CREATE INDEX tasks_cache_priority_idx ON tasks_cache(priority DESC);
+CREATE INDEX tasks_cache_updated_idx ON tasks_cache(updated_at);
+CREATE INDEX tasks_cache_tags_gin ON tasks_cache USING GIN(tags);
+
+1.3 leases (atomic lock)
+CREATE TABLE leases (
+  task_id            TEXT PRIMARY KEY REFERENCES tasks_cache(task_id) ON DELETE CASCADE,
+  agent_id           TEXT NOT NULL REFERENCES agents(agent_id) ON DELETE CASCADE,
+  lease_token        UUID NOT NULL,
+  acquired_at        TIMESTAMPTZ NOT NULL,
+  renewed_at         TIMESTAMPTZ NOT NULL,
+  expires_at         TIMESTAMPTZ NOT NULL,
+  max_expires_at     TIMESTAMPTZ NOT NULL,        -- acquired_at + max_lease_age_sec
+  last_progress_at   TIMESTAMPTZ NOT NULL,        -- progress heartbeat (not just renew)
+  stuck_cycles       INTEGER NOT NULL DEFAULT 0,  -- increments per auto-release
+  state              TEXT NOT NULL DEFAULT 'ACTIVE'  -- ACTIVE|RELEASING|RELEASED
+);
+
+CREATE INDEX leases_agent_idx ON leases(agent_id);
+CREATE INDEX leases_expires_idx ON leases(expires_at);
+CREATE INDEX leases_progress_idx ON leases(last_progress_at);
+
+1.4 task_events (immutable audit/event stream)
+CREATE TABLE task_events (
+  id                BIGSERIAL PRIMARY KEY,
+  ts                TIMESTAMPTZ NOT NULL DEFAULT now(),
+  task_id            TEXT,
+  agent_id           TEXT,
+  event_type         TEXT NOT NULL,
+  severity           TEXT NOT NULL DEFAULT 'INFO', -- INFO|WARN|ERROR|CRITICAL
+  correlation_id     UUID NOT NULL,
+  payload            JSONB NOT NULL
+);
+
+CREATE INDEX task_events_ts_idx ON task_events(ts DESC);
+CREATE INDEX task_events_task_idx ON task_events(task_id, ts DESC);
+CREATE INDEX task_events_agent_idx ON task_events(agent_id, ts DESC);
+CREATE INDEX task_events_type_idx ON task_events(event_type, ts DESC);
+
+1.5 acquisition_stats_10m (rollups for the dashboard)
+
+Bucket by 10 minutes (or 1h if you want simpler).
+
+CREATE TABLE acquisition_stats_10m (
+  bucket_start       TIMESTAMPTZ NOT NULL,
+  agent_id           TEXT NOT NULL,
+  attempts           INTEGER NOT NULL DEFAULT 0,
+  success            INTEGER NOT NULL DEFAULT 0,
+  conflicts          INTEGER NOT NULL DEFAULT 0,
+  rejects_invalid    INTEGER NOT NULL DEFAULT 0,
+  rejects_blocked    INTEGER NOT NULL DEFAULT 0,
+  rejects_scope      INTEGER NOT NULL DEFAULT 0,
+  avg_eval_ms        INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(bucket_start, agent_id)
+);
+
+2) Event types + JSON payloads (canonical)
+
+All events share:
+
+correlation_id: UUID per run / per claim pipeline
+
+payload fields below
+
+2.1 Acquisition funnel
+
+acquisition.scan_started
+
+{
+  "lane_filter": ["BACKLOG"],
+  "tag_filter": ["ops", "admin"],
+  "pull_mode": "PRIORITY_FIRST",
+  "avoid_blocked": true,
+  "candidate_limit": 200
+}
+
+
+acquisition.candidates_evaluated
+
+{
+  "candidates_total": 137,
+  "candidates_after_scope": 82,
+  "candidates_after_blocked_filter": 61,
+  "candidates_after_validation": 43,
+  "eval_ms": 218,
+  "top5": [
+    {"task_id":"T-104","score":184.2},
+    {"task_id":"T-119","score":179.7}
+  ]
+}
+
+
+acquisition.claim_attempt
+
+{
+  "task_id": "T-104",
+  "score": 184.2,
+  "lease_ttl_sec": 3600,
+  "max_lease_age_sec": 21600
+}
+
+
+acquisition.claim_success
+
+{
+  "task_id": "T-104",
+  "lease_token": "6b03c3e9-3b27-4b26-92a0-6b1cc5b8f9ce",
+  "expires_at": "2026-02-04T07:15:00Z",
+  "max_expires_at": "2026-02-04T12:15:00Z"
+}
+
+
+acquisition.claim_conflict
+
+{
+  "task_id": "T-104",
+  "reason": "LEASE_HELD",
+  "held_by_agent": "AGENT-03",
+  "expires_at": "2026-02-04T07:12:00Z"
+}
+
+
+acquisition.reject_invalid
+
+{
+  "task_id": "T-221",
+  "reasons": [
+    "MISSING_ACCEPTANCE_CRITERIA",
+    "MISSING_OUTPUT_TARGET"
+  ],
+  "policy": {
+    "require_acceptance": true,
+    "require_output_target": true,
+    "require_owner": false,
+    "require_links": false
+  }
+}
+
+
+acquisition.reject_blocked
+
+{
+  "task_id": "T-155",
+  "blocked_by": ["T-120","T-121"],
+  "policy": {"avoid_blocked": true}
+}
+
+
+acquisition.reject_scope
+
+{
+  "task_id": "T-188",
+  "reason": "TAG_NOT_ALLOWED",
+  "tags": ["legal"]
+}
+
+2.2 Lease lifecycle
+
+lease.renewed
+
+{
+  "task_id": "T-104",
+  "lease_token": "6b03c3e9-3b27-4b26-92a0-6b1cc5b8f9ce",
+  "prev_expires_at": "2026-02-04T07:15:00Z",
+  "new_expires_at": "2026-02-04T07:25:00Z"
+}
+
+
+lease.progress (important for stuck detection)
+
+{
+  "task_id": "T-104",
+  "lease_token": "6b03c3e9-3b27-4b26-92a0-6b1cc5b8f9ce",
+  "step": "retrieve|infer|write|commit|notify",
+  "message": "Added artifact link to PR and updated checklist.",
+  "checklist_done": 3,
+  "checklist_total": 7,
+  "artifacts_added": [
+    {"type":"PR","url":"https://...","desc":"Draft PR for schema migration"}
+  ]
+}
+
+
+lease.released
+
+{
+  "task_id": "T-104",
+  "lease_token": "6b03c3e9-3b27-4b26-92a0-6b1cc5b8f9ce",
+  "reason": "COMPLETED|HANDOFF|AUTO_RELEASE_STUCK|MANUAL",
+  "delivered": true,
+  "final_artifacts": [
+    {"type":"DOC","url":"https://...","desc":"Runbook updated"},
+    {"type":"DISCORD","url":"discord://.../msg/123","desc":"Announcement"}
+  ]
+}
+
+2.3 Stuck detection
+
+stuck.detected
+
+{
+  "task_id": "T-104",
+  "lease_token": "6b03c3e9-3b27-4b26-92a0-6b1cc5b8f9ce",
+  "last_progress_at": "2026-02-04T06:10:00Z",
+  "stuck_after_sec": 2700,
+  "now": "2026-02-04T06:58:00Z",
+  "action": "PING|AUTO_RELEASE|HANDOFF",
+  "stuck_cycles": 1
+}
+
+3) Validation (required fields) function
+
+Return (valid: bool, reasons: [code]) based on agent policy.
+
+Reason codes
+
+MISSING_ACCEPTANCE_CRITERIA
+
+MISSING_OUTPUT_TARGET
+
+MISSING_OWNER
+
+MISSING_LINKS
+
+INVALID_LANE
+
+TAG_NOT_ALLOWED
+
+4) Pull strategy scoring (V1 formula)
+
+Normalize inputs:
+
+priority already 0..100
+
+age_hours = (now - created_at)/3600
+
+stale_hours = (now - updated_at)/3600
+
+blocked = len(blocked_by)>0
+
+Weights:
+
+PRIORITY_FIRST: wP=1.0, wA=0.2, wU=0.2
+
+OLDEST_FIRST: wP=0.3, wA=1.0, wU=0.3
+
+Blocked penalty: if avoid_blocked, filter; else -1000
+
+Score:
+score = wP*priority + wA*age_hours + wU*stale_hours - (blocked?1000:0)
+
+5) Pseudocode (atomic lease semantics)
+5.1 Acquire lease (single task)
+
+Assumes Postgres is authority for lease lock; Kanban is updated after acquisition.
+
+function try_acquire_lease(agent_id, task_id, now):
+  cfg = load_agent_config(agent_id)
+
+  begin transaction
+
+  -- ensure task exists in cache (or insert placeholder)
+  task = select * from tasks_cache where task_id = :task_id for update
+  if task missing:
+     rollback; return {ok:false, reason:"TASK_NOT_IN_CACHE"}
+
+  -- scope checks
+  if task.lane not in cfg.allowed_lanes:
+     rollback; return {ok:false, reason:"REJECT_SCOPE", code:"INVALID_LANE"}
+
+  if cfg.allowed_tags not empty and intersection(task.tags, cfg.allowed_tags) empty:
+     rollback; return {ok:false, reason:"REJECT_SCOPE", code:"TAG_NOT_ALLOWED"}
+
+  -- blocked avoidance
+  if cfg.avoid_blocked and length(task.blocked_by) > 0:
+     rollback; return {ok:false, reason:"REJECT_BLOCKED", blocked_by: task.blocked_by}
+
+  -- required fields validation
+  (valid, reasons) = validate_required_fields(task, cfg)
+  if not valid:
+     rollback; return {ok:false, reason:"REJECT_INVALID", reasons: reasons}
+
+  -- check existing lease
+  lease = select * from leases where task_id = :task_id for update
+  if lease exists:
+     if lease.expires_at > now and lease.state='ACTIVE':
+        rollback; return {ok:false, reason:"LEASE_HELD", held_by: lease.agent_id, expires_at: lease.expires_at}
+     else:
+        -- expired/abandoned lease; takeover
+        delete from leases where task_id = :task_id
+
+  lease_token = uuid4()
+  acquired_at = now
+  expires_at = now + cfg.lease_ttl_sec
+  max_expires_at = now + cfg.max_lease_age_sec
+
+  insert into leases(task_id, agent_id, lease_token, acquired_at, renewed_at, expires_at, max_expires_at, last_progress_at, stuck_cycles, state)
+    values(task_id, agent_id, lease_token, acquired_at, acquired_at, expires_at, max_expires_at, acquired_at, 0, 'ACTIVE')
+
+  commit
+
+  emit_event("acquisition.claim_success", {...})
+  return {ok:true, lease_token, expires_at, max_expires_at}
+
+5.2 Candidate selection + claim loop (batch)
+function run_agent_once(agent_id):
+  now = time()
+  cfg = load_agent_config(agent_id)
+  corr = uuid4()
+
+  emit_event("acquisition.scan_started", {...}, corr)
+
+  candidates = query_candidates(cfg, now)           -- from tasks_cache
+  scored = []
+  for task in candidates:
+     if not scope_ok(task,cfg): continue
+     if cfg.avoid_blocked and task.blocked_by not empty: continue
+     (valid, reasons) = validate_required_fields(task,cfg)
+     if not valid:
+        emit_event("acquisition.reject_invalid", {task_id, reasons}, corr)
+        continue
+     score = compute_score(task,cfg,now)
+     scored.append({task, score})
+
+  sort scored by score desc
+  emit_event("acquisition.candidates_evaluated", {...top5...}, corr)
+
+  claimed = []
+  for item in scored:
+     if length(claimed) >= cfg.max_tasks_per_run: break
+     emit_event("acquisition.claim_attempt", {task_id:item.task.task_id, score:item.score}, corr)
+     res = try_acquire_lease(agent_id, item.task.task_id, now)
+     if res.ok:
+        claimed.append({task_id:item.task.task_id, lease_token:res.lease_token})
+     else if res.reason == "LEASE_HELD":
+        emit_event("acquisition.claim_conflict", {...}, corr)
+     else if res.reason startswith "REJECT_":
+        -- already emitted reject_invalid; emit blocked/scope as needed
+        pass
+
+  return claimed
+
+5.3 Renew lease (heartbeat) + progress
+
+Renew and progress are distinct: renew extends TTL; progress updates last_progress_at.
+
+function renew_lease(agent_id, task_id, lease_token, now):
+  cfg = load_agent_config(agent_id)
+  begin transaction
+  lease = select * from leases where task_id=:task_id for update
+  if lease missing: rollback; return {ok:false, reason:"NO_LEASE"}
+  if lease.agent_id != agent_id or lease.lease_token != lease_token:
+     rollback; return {ok:false, reason:"NOT_OWNER"}
+
+  new_expires = min(now + cfg.lease_ttl_sec, lease.max_expires_at)
+  if new_expires <= now:
+     -- max lease age reached
+     rollback; return {ok:false, reason:"MAX_LEASE_AGE_REACHED"}
+
+  update leases set renewed_at=now, expires_at=new_expires where task_id=:task_id
+  commit
+  emit_event("lease.renewed", {...})
+  return {ok:true, expires_at:new_expires}
+
+function mark_progress(agent_id, task_id, lease_token, now, step, message, artifacts_added, checklist_done, checklist_total):
+  begin transaction
+  lease = select * from leases where task_id=:task_id for update
+  if missing or not owner: rollback; return {ok:false, reason:"NOT_OWNER"}
+
+  update leases set last_progress_at=now where task_id=:task_id
+  commit
+
+  emit_event("lease.progress", {
+    task_id, lease_token, step, message,
+    checklist_done, checklist_total,
+    artifacts_added
+  })
+  return {ok:true}
+
+5.4 Release lease (complete / handoff / auto-release)
+function release_lease(agent_id, task_id, lease_token, now, reason, delivered, final_artifacts):
+  begin transaction
+  lease = select * from leases where task_id=:task_id for update
+  if lease missing: rollback; return {ok:false, reason:"NO_LEASE"}
+  if lease.agent_id != agent_id or lease.lease_token != lease_token:
+     rollback; return {ok:false, reason:"NOT_OWNER"}
+
+  delete from leases where task_id=:task_id
+  commit
+
+  emit_event("lease.released", {task_id, lease_token, reason, delivered, final_artifacts})
+  return {ok:true}
+
+5.5 Stuck detection loop (global cron, every 5–10 min)
+function stuck_sweeper():
+  now = time()
+  for each lease in leases where state='ACTIVE':
+     cfg = load_agent_config(lease.agent_id)
+     inactive = now - lease.last_progress_at
+
+     if inactive < cfg.stuck_after_sec:
+        continue
+
+     -- emit detected
+     emit_event("stuck.detected", {...action:"PING"...})
+
+     if inactive < cfg.stuck_after_sec + cfg.stuck_grace_sec:
+        continue
+
+     -- auto-release + escalate cycle count
+     begin transaction
+     lease2 = select * from leases where task_id=lease.task_id for update
+     if lease2 missing: rollback; continue
+     -- re-check under lock
+     inactive2 = now - lease2.last_progress_at
+     if inactive2 < cfg.stuck_after_sec + cfg.stuck_grace_sec:
+        rollback; continue
+
+     cycles = lease2.stuck_cycles + 1
+     -- release
+     delete from leases where task_id=lease.task_id
+     commit
+
+     emit_event("lease.released", {reason:"AUTO_RELEASE_STUCK", ...})
+     emit_event("stuck.detected", {...action:"AUTO_RELEASE", stuck_cycles:cycles...})
+
+     if cycles >= cfg.stuck_max_cycles:
+        -- handoff: mark in Kanban + cache (NEEDS_ATTENTION tag/lane)
+        emit_event("stuck.detected", {...action:"HANDOFF"...})
+        kanban_move_to_needs_attention(lease.task_id)
+
+6) Candidate query (SQL skeleton)
+
+PRIORITY_FIRST example (avoid blocked, only backlog):
+
+SELECT *
+FROM tasks_cache t
+LEFT JOIN leases l ON l.task_id = t.task_id AND l.expires_at > now() AND l.state='ACTIVE'
+WHERE
+  t.lane = ANY($1)                                  -- allowed lanes
+  AND (cardinality($2::text[]) = 0 OR t.tags && $2) -- allowed tags
+  AND l.task_id IS NULL                             -- not currently leased
+  AND (NOT $3 OR cardinality(t.blocked_by) = 0)     -- avoid_blocked
+ORDER BY
+  t.priority DESC,
+  t.created_at ASC,
+  t.updated_at ASC
+LIMIT $4;
+
+
+If you prefer scoring in SQL:
+
+SELECT
+  t.*,
+  ( $wP*t.priority
+    + $wA*EXTRACT(EPOCH FROM (now()-t.created_at))/3600.0
+    + $wU*EXTRACT(EPOCH FROM (now()-t.updated_at))/3600.0
+  ) AS score
+FROM ...
+ORDER BY score DESC
+LIMIT ...
+
+7) V1 “required fields validation” pseudocode
+function validate_required_fields(task, cfg):
+  reasons = []
+  if cfg.require_acceptance and (task.acceptance_criteria is null or len(trim(task.acceptance_criteria)) < 20):
+     reasons.append("MISSING_ACCEPTANCE_CRITERIA")
+  if cfg.require_output_target and (task.output_target_type is null or task.output_target_ref is null):
+     reasons.append("MISSING_OUTPUT_TARGET")
+  if cfg.require_owner and (task.owner is null or trim(task.owner) == ""):
+     reasons.append("MISSING_OWNER")
+  if cfg.require_links and (task.links is empty):
+     reasons.append("MISSING_LINKS")
+  return (len(reasons)==0, reasons)
+
+8) Discord notifications (minimal payload)
+
+Log every outbound notification to correlate ops.
+notification.sent
+
+{
+  "channel": "#incidents",
+  "message_type": "STUCK|CLAIMED|COMPLETED|ERROR",
+  "task_id": "T-104",
+  "agent_id": "AGENT-02",
+  "discord_message_id": "1234567890"
+}
+
+
+If you want this to be drop-in implementable for your coder agent, next I can provide:
+
+exact SQL for upserts into acquisition_stats_10m
+
+a single “agent_run” state machine (steps + timeouts)
+
+and a canonical Kanban field mapping (so tasks_cache sync is deterministic).

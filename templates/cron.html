@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="/static/favicon.png">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <title>Mission Control — Cron Jobs</title>
+    <link rel="stylesheet" href="/static/ide-noir.css">
+    <link rel="stylesheet" href="/static/mission-control.css">
+    <style>
+        .cron-layout {
+            display: flex;
+            height: calc(100vh - 48px);
+            overflow: hidden;
+        }
+        .cron-main {
+            flex: 1;
+            padding: 16px;
+            overflow-y: auto;
+        }
+        .cron-header {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+        .cron-header h2 {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 600;
+        }
+        .cron-stats {
+            margin-left: auto;
+            font-size: 12px;
+            color: #888;
+            font-family: monospace;
+        }
+        
+        /* Agent sections */
+        .agent-section {
+            margin-bottom: 24px;
+        }
+        .agent-section-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            background: #1e3a5f;
+            border-radius: 6px 6px 0 0;
+            border-bottom: 2px solid #4a9eff;
+        }
+        .agent-section-header .emoji {
+            font-size: 18px;
+        }
+        .agent-section-header .name {
+            font-weight: 600;
+            color: #fff;
+        }
+        .agent-section-header .status {
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            background: #333;
+            color: #888;
+        }
+        .agent-section-header .status.active {
+            background: #1a4a1a;
+            color: #4aff4a;
+        }
+        .agent-section-header .context {
+            margin-left: auto;
+            font-size: 11px;
+            color: #888;
+            font-family: monospace;
+        }
+        
+        /* Job cards */
+        .jobs-list {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-top: none;
+            border-radius: 0 0 6px 6px;
+        }
+        .job-card {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            border-bottom: 1px solid #2a2a2a;
+        }
+        .job-card:last-child {
+            border-bottom: none;
+        }
+        .job-enabled {
+            width: 36px;
+        }
+        .job-enabled input {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+        }
+        .job-info {
+            flex: 1;
+            min-width: 0;
+        }
+        .job-name {
+            font-weight: 500;
+            color: #e0e0e0;
+            margin-bottom: 4px;
+        }
+        .job-name.disabled {
+            color: #666;
+            text-decoration: line-through;
+        }
+        .job-schedule {
+            font-size: 11px;
+            color: #888;
+            font-family: monospace;
+        }
+        .job-status {
+            width: 140px;
+            text-align: right;
+        }
+        .job-last-run {
+            font-size: 11px;
+            color: #888;
+        }
+        .job-last-run.ok {
+            color: #4aff4a;
+        }
+        .job-last-run.error {
+            color: #ff4a4a;
+        }
+        .job-last-run.skipped {
+            color: #ffaa00;
+        }
+        .job-next-run {
+            font-size: 10px;
+            color: #666;
+            margin-top: 2px;
+        }
+        .job-duration {
+            font-size: 10px;
+            color: #666;
+            margin-top: 2px;
+        }
+        
+        /* Filter toggle */
+        .filter-toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: #888;
+        }
+        .filter-toggle input {
+            cursor: pointer;
+        }
+        .filter-toggle label {
+            cursor: pointer;
+        }
+        .job-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .btn-run {
+            padding: 4px 12px;
+            font-size: 11px;
+            background: #2a5a2a;
+            border: 1px solid #4a8a4a;
+            color: #4aff4a;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .btn-run:hover {
+            background: #3a6a3a;
+        }
+        .btn-run:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        /* Empty state */
+        .no-jobs {
+            padding: 24px;
+            text-align: center;
+            color: #666;
+        }
+        
+        /* Refresh button */
+        .btn-refresh {
+            padding: 6px 12px;
+            font-size: 12px;
+            background: #252525;
+            border: 1px solid #444;
+            color: #e0e0e0;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .btn-refresh:hover {
+            background: #333;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="nav-bar">
+        <div class="nav-container">
+            <div class="nav-left">
+                <span class="nav-title">Mission Control</span>
+                <div class="nav-tabs">
+                    <a href="/" class="nav-tab">Kanban</a>
+                    <a href="/briefing" class="nav-tab">Briefing</a>
+                    <a href="/email" class="nav-tab">Email</a>
+                    <a href="/queue" class="nav-tab">Agent Queue</a>
+                    <a href="/cron" class="nav-tab active">Cron Jobs</a>
+                    <a href="/synapse" class="nav-tab">Synapse</a>
+                    <a href="https://jarvis.jwells.net/activity" class="nav-tab" target="_blank">Jarvis</a>
+                </div>
+            </div>
+            <div class="nav-right">
+                <span class="cron-stats" id="cron-stats">—</span>
+            </div>
+        </div>
+    </nav>
+
+    <div class="cron-layout">
+        <div class="cron-main">
+            <div class="cron-header">
+                <h2>Cron Jobs</h2>
+                <div class="filter-toggle">
+                    <input type="checkbox" id="show-disabled" checked>
+                    <label for="show-disabled">Show disabled</label>
+                </div>
+                <button class="btn-refresh" id="refresh-btn">↻ Refresh</button>
+            </div>
+            
+            <div id="jobs-container">
+                <div class="no-jobs">Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const GATEWAY_TOKEN = '1eba89d56887b8dd1845e1d0898935f8ad378ffc28dd556c';
+        
+        // Agent metadata
+        const AGENTS = {
+            'jarvis': { name: 'Jarvis', emoji: '🎩', domain: 'AI/Infra' },
+            'aria': { name: 'Aria', emoji: '📚', domain: 'Research' },
+            'peter': { name: 'Peter', emoji: '📈', domain: 'Finance' },
+            'watson': { name: 'Dr. Watson', emoji: '🩺', domain: 'Medical' },
+            'willb': { name: 'Will B.', emoji: '🏢', domain: 'Novvi' },
+            'elon': { name: 'ELon', emoji: '🚀', domain: 'Startup' },
+        };
+        
+        let jobs = [];
+        let agentStatus = {};
+        
+        async function loadData() {
+            await Promise.all([loadJobs(), loadAgentStatus()]);
+            render();
+        }
+        
+        async function loadJobs() {
+            try {
+                const resp = await fetch('/api/cron/jobs');
+                const data = await resp.json();
+                jobs = data.jobs || [];
+            } catch (e) {
+                console.error('Failed to load jobs:', e);
+                jobs = [];
+            }
+        }
+        
+        async function loadAgentStatus() {
+            try {
+                const resp = await fetch('/api/agents');
+                const data = await resp.json();
+                agentStatus = {};
+                (data.agents || []).forEach(a => {
+                    agentStatus[a.id] = a;
+                });
+            } catch (e) {
+                console.error('Failed to load agent status:', e);
+            }
+        }
+        
+        function render() {
+            const container = document.getElementById('jobs-container');
+            const showDisabled = document.getElementById('show-disabled').checked;
+            
+            // Filter jobs
+            const filteredJobs = showDisabled ? jobs : jobs.filter(j => j.enabled);
+            
+            // Group jobs by agent
+            const byAgent = {};
+            filteredJobs.forEach(job => {
+                const agentId = job.agentId || 'unknown';
+                if (!byAgent[agentId]) byAgent[agentId] = [];
+                byAgent[agentId].push(job);
+            });
+            
+            // Sort agents
+            const agentOrder = ['jarvis', 'aria', 'peter', 'watson', 'willb', 'elon'];
+            const sortedAgents = Object.keys(byAgent).sort((a, b) => {
+                const ai = agentOrder.indexOf(a);
+                const bi = agentOrder.indexOf(b);
+                return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+            });
+            
+            if (sortedAgents.length === 0) {
+                container.innerHTML = '<div class="no-jobs">No cron jobs configured</div>';
+                return;
+            }
+            
+            let html = '';
+            let totalJobs = 0;
+            let enabledJobs = 0;
+            
+            sortedAgents.forEach(agentId => {
+                const agentJobs = byAgent[agentId];
+                const meta = AGENTS[agentId] || { name: agentId, emoji: '🤖', domain: '' };
+                const status = agentStatus[agentId] || {};
+                
+                totalJobs += agentJobs.length;
+                enabledJobs += agentJobs.filter(j => j.enabled).length;
+                
+                html += `
+                    <div class="agent-section">
+                        <div class="agent-section-header">
+                            <span class="emoji">${meta.emoji}</span>
+                            <span class="name">${meta.name}</span>
+                            <span class="status ${status.status || ''}">${status.status || 'unknown'}</span>
+                            ${status.context_pct !== null ? `<span class="context">${status.context_pct}% ctx</span>` : ''}
+                        </div>
+                        <div class="jobs-list">
+                            ${agentJobs.map(job => renderJob(job)).join('')}
+                        </div>
+                    </div>
+                `;
+            });
+            
+            container.innerHTML = html;
+            document.getElementById('cron-stats').textContent = `${enabledJobs}/${totalJobs} enabled`;
+        }
+        
+        function renderJob(job) {
+            const schedule = formatSchedule(job.schedule);
+            const lastStatus = job.state?.lastStatus || 'unknown';
+            const lastRun = job.state?.lastRunAtMs ? formatTimeAgo(job.state.lastRunAtMs) : 'never';
+            const nextRun = job.state?.nextRunAtMs ? formatTimeAgo(job.state.nextRunAtMs, true) : '—';
+            const duration = job.state?.lastDurationMs ? formatDuration(job.state.lastDurationMs) : '';
+            
+            return `
+                <div class="job-card" data-job-id="${job.id}">
+                    <div class="job-enabled">
+                        <input type="checkbox" ${job.enabled ? 'checked' : ''} 
+                               onchange="toggleJob('${job.id}', this.checked)"
+                               title="${job.enabled ? 'Disable' : 'Enable'} job">
+                    </div>
+                    <div class="job-info">
+                        <div class="job-name ${job.enabled ? '' : 'disabled'}">${job.name || job.id}</div>
+                        <div class="job-schedule">${schedule}</div>
+                    </div>
+                    <div class="job-status">
+                        <div class="job-last-run ${lastStatus}">${lastStatus}: ${lastRun}</div>
+                        ${duration ? `<div class="job-duration">took ${duration}</div>` : ''}
+                        <div class="job-next-run">next: ${nextRun}</div>
+                    </div>
+                    <div class="job-actions">
+                        <button class="btn-run" onclick="runJob('${job.id}')" ${!job.enabled ? 'disabled' : ''}>
+                            Run Now
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function formatDuration(ms) {
+            if (ms < 1000) return `${ms}ms`;
+            const secs = Math.round(ms / 1000);
+            if (secs < 60) return `${secs}s`;
+            const mins = Math.round(secs / 60);
+            return `${mins}m ${secs % 60}s`;
+        }
+        
+        function formatSchedule(schedule) {
+            if (!schedule) return '?';
+            if (schedule.kind === 'every') {
+                const mins = Math.round(schedule.everyMs / 60000);
+                if (mins < 60) return `every ${mins}m`;
+                const hrs = Math.round(mins / 60);
+                return `every ${hrs}h`;
+            }
+            if (schedule.kind === 'cron') {
+                return schedule.expr;
+            }
+            if (schedule.kind === 'at') {
+                return `at ${new Date(schedule.atMs).toLocaleString()}`;
+            }
+            return JSON.stringify(schedule);
+        }
+        
+        function formatTimeAgo(ms, future = false) {
+            const now = Date.now();
+            const diff = future ? ms - now : now - ms;
+            const mins = Math.round(diff / 60000);
+            if (mins < 1) return future ? 'soon' : 'just now';
+            if (mins < 60) return `${mins}m ${future ? '' : 'ago'}`;
+            const hrs = Math.round(mins / 60);
+            if (hrs < 24) return `${hrs}h ${future ? '' : 'ago'}`;
+            const days = Math.round(hrs / 24);
+            return `${days}d ${future ? '' : 'ago'}`;
+        }
+        
+        async function toggleJob(jobId, enabled) {
+            try {
+                const resp = await fetch(`/api/cron/jobs/${jobId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled })
+                });
+                if (!resp.ok) throw new Error('Failed to update job');
+                await loadData();
+            } catch (e) {
+                console.error('Toggle failed:', e);
+                alert('Failed to toggle job');
+                await loadData();
+            }
+        }
+        
+        async function runJob(jobId) {
+            const btn = event.target;
+            btn.disabled = true;
+            btn.textContent = 'Running...';
+            
+            try {
+                const resp = await fetch(`/api/cron/jobs/${jobId}/run`, {
+                    method: 'POST'
+                });
+                if (!resp.ok) throw new Error('Failed to run job');
+                
+                btn.textContent = 'Started!';
+                setTimeout(() => {
+                    btn.textContent = 'Run Now';
+                    btn.disabled = false;
+                    loadData();
+                }, 2000);
+            } catch (e) {
+                console.error('Run failed:', e);
+                alert('Failed to run job');
+                btn.textContent = 'Run Now';
+                btn.disabled = false;
+            }
+        }
+        
+        // Init
+        document.getElementById('refresh-btn').addEventListener('click', loadData);
+        document.getElementById('show-disabled').addEventListener('change', render);
+        loadData();
+        
+        // Auto-refresh every 30s
+        setInterval(loadData, 30000);
+    </script>
+</body>
+</html>

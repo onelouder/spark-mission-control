@@ -1,0 +1,288 @@
+<!-- Bot Activity Monitoring Widget -->
+<div class="widget" id="bot-activity-widget">
+    <div class="widget-header">
+        <h3>🛡️ Bot Activity Monitor</h3>
+        <div class="widget-controls">
+            <button class="btn btn-sm" onclick="refreshBotActivity()">🔄</button>
+            <button class="btn btn-sm" onclick="toggleBotActivityDetails()">📊</button>
+        </div>
+    </div>
+    
+    <div class="widget-body">
+        <div class="metrics-summary" id="bot-metrics-summary">
+            <div class="metric">
+                <span class="metric-value" id="bot-messages-1min">-</span>
+                <span class="metric-label">msgs/min</span>
+            </div>
+            <div class="metric">
+                <span class="metric-value" id="bot-rate-limit-pct">-</span>
+                <span class="metric-label">rate limit</span>
+            </div>
+            <div class="metric">
+                <span class="metric-value" id="bot-active-alerts">-</span>
+                <span class="metric-label">alerts</span>
+            </div>
+        </div>
+        
+        <div class="alerts-section" id="bot-alerts-section" style="display: none;">
+            <div class="alerts-list" id="bot-alerts-list">
+                <!-- Alerts populated by JavaScript -->
+            </div>
+        </div>
+        
+        <div class="bot-activity-status" id="bot-activity-status">
+            <span class="status-indicator" id="bot-status-indicator">●</span>
+            <span class="status-text" id="bot-status-text">Loading...</span>
+        </div>
+    </div>
+</div>
+
+<style>
+.widget {
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    margin: 10px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.widget-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid #eee;
+    background: #f8f9fa;
+    border-radius: 8px 8px 0 0;
+}
+
+.widget-header h3 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.widget-controls button {
+    margin-left: 4px;
+    padding: 4px 8px;
+    border: none;
+    background: #e9ecef;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.widget-controls button:hover {
+    background: #dee2e6;
+}
+
+.widget-body {
+    padding: 16px;
+}
+
+.metrics-summary {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+
+.metric {
+    text-align: center;
+    flex: 1;
+}
+
+.metric-value {
+    display: block;
+    font-size: 18px;
+    font-weight: bold;
+    color: #333;
+}
+
+.metric-label {
+    font-size: 11px;
+    color: #666;
+    text-transform: uppercase;
+}
+
+.alerts-section {
+    margin: 12px 0;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.alert-item {
+    padding: 8px 12px;
+    margin: 4px 0;
+    border-radius: 4px;
+    border-left: 4px solid;
+    font-size: 12px;
+}
+
+.alert-critical {
+    background: #f8d7da;
+    border-left-color: #dc3545;
+}
+
+.alert-warning {
+    background: #fff3cd;
+    border-left-color: #ffc107;
+}
+
+.alert-info {
+    background: #d1ecf1;
+    border-left-color: #17a2b8;
+}
+
+.alert-title {
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.alert-time {
+    color: #666;
+    font-size: 10px;
+}
+
+.alert-actions {
+    margin-top: 4px;
+}
+
+.alert-actions button {
+    padding: 2px 6px;
+    font-size: 10px;
+    border: none;
+    background: rgba(0,0,0,0.1);
+    border-radius: 2px;
+    cursor: pointer;
+}
+
+.bot-activity-status {
+    display: flex;
+    align-items: center;
+    font-size: 12px;
+    margin-top: 8px;
+}
+
+.status-indicator {
+    margin-right: 6px;
+    font-size: 8px;
+}
+
+.status-indicator.ok { color: #28a745; }
+.status-indicator.warning { color: #ffc107; }
+.status-indicator.critical { color: #dc3545; }
+.status-indicator.unknown { color: #6c757d; }
+</style>
+
+<script>
+let botActivityDetailsVisible = false;
+
+async function refreshBotActivity() {
+    try {
+        const response = await fetch('/api/bot-activity/status');
+        const data = await response.json();
+        
+        updateBotActivityDisplay(data);
+    } catch (error) {
+        console.error('Failed to refresh bot activity:', error);
+        document.getElementById('bot-status-text').textContent = 'Error loading status';
+    }
+}
+
+function updateBotActivityDisplay(data) {
+    const metrics = data.current_metrics || {};
+    const alerts = data.active_alerts || {};
+    
+    // Update metrics
+    document.getElementById('bot-messages-1min').textContent = metrics.message_count_1min || '-';
+    
+    const rateLimitPct = metrics.rate_limit_requests_used_pct;
+    if (rateLimitPct !== null && rateLimitPct !== undefined) {
+        document.getElementById('bot-rate-limit-pct').textContent = `${rateLimitPct.toFixed(0)}%`;
+    } else {
+        document.getElementById('bot-rate-limit-pct').textContent = '-';
+    }
+    
+    document.getElementById('bot-active-alerts').textContent = alerts.total || '0';
+    
+    // Update alerts list
+    const alertsList = document.getElementById('bot-alerts-list');
+    alertsList.innerHTML = '';
+    
+    if (alerts.by_severity) {
+        ['critical', 'warning', 'info'].forEach(severity => {
+            const severityAlerts = alerts.by_severity[severity] || [];
+            severityAlerts.forEach(alert => {
+                const alertDiv = document.createElement('div');
+                alertDiv.className = `alert-item alert-${severity}`;
+                alertDiv.innerHTML = `
+                    <div class="alert-title">${alert.title}</div>
+                    <div class="alert-description">${alert.description}</div>
+                    <div class="alert-time">${new Date(alert.timestamp).toLocaleString()}</div>
+                    <div class="alert-actions">
+                        <button onclick="resolveAlert('${alert.id}')">Resolve</button>
+                    </div>
+                `;
+                alertsList.appendChild(alertDiv);
+            });
+        });
+    }
+    
+    if (alertsList.children.length === 0) {
+        alertsList.innerHTML = '<div style="color: #666; text-align: center; padding: 20px;">No active alerts</div>';
+    }
+    
+    // Update status indicator
+    const statusIndicator = document.getElementById('bot-status-indicator');
+    const statusText = document.getElementById('bot-status-text');
+    
+    if (data.monitoring_status === 'active') {
+        const totalAlerts = alerts.total || 0;
+        const hasCritical = alerts.by_severity && alerts.by_severity.critical && alerts.by_severity.critical.length > 0;
+        const hasWarning = alerts.by_severity && alerts.by_severity.warning && alerts.by_severity.warning.length > 0;
+        
+        if (hasCritical) {
+            statusIndicator.className = 'status-indicator critical';
+            statusText.textContent = `${totalAlerts} critical alerts`;
+        } else if (hasWarning) {
+            statusIndicator.className = 'status-indicator warning';
+            statusText.textContent = `${totalAlerts} warnings`;
+        } else {
+            statusIndicator.className = 'status-indicator ok';
+            statusText.textContent = 'All systems normal';
+        }
+    } else {
+        statusIndicator.className = 'status-indicator unknown';
+        statusText.textContent = 'Monitoring inactive';
+    }
+}
+
+function toggleBotActivityDetails() {
+    const alertsSection = document.getElementById('bot-alerts-section');
+    botActivityDetailsVisible = !botActivityDetailsVisible;
+    alertsSection.style.display = botActivityDetailsVisible ? 'block' : 'none';
+}
+
+async function resolveAlert(alertId) {
+    try {
+        const response = await fetch(`/api/bot-activity/resolve-alert/${alertId}`, {
+            method: 'POST'
+        });
+        
+        if (response.ok) {
+            refreshBotActivity();
+        } else {
+            alert('Failed to resolve alert');
+        }
+    } catch (error) {
+        console.error('Failed to resolve alert:', error);
+        alert('Error resolving alert');
+    }
+}
+
+// Auto-refresh every 30 seconds
+setInterval(refreshBotActivity, 30000);
+
+// Initial load
+document.addEventListener('DOMContentLoaded', refreshBotActivity);
+</script>

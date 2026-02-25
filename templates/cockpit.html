@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="/static/favicon.png">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <title>Mission Control — Cockpit</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="/static/ide-noir.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --sidebar-width: 200px;
+            --sidebar-collapsed: 48px;
+            --header-height: 40px;
+            --bg-primary: #0d0d0d;
+            --bg-secondary: #141414;
+            --bg-tertiary: #1a1a1a;
+            --border-color: #2a2a2a;
+            --text-primary: #e0e0e0;
+            --text-secondary: #808080;
+            --accent: #4a9eff;
+            --accent-dim: #2a5a8f;
+            --danger: #ff4a4a;
+            --warning: #ffaa00;
+            --success: #4aff4a;
+        }
+
+        html, body {
+            height: 100%;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            font-size: 13px;
+            overflow: hidden;
+        }
+
+        /* Layout */
+        .cockpit {
+            display: flex;
+            height: 100vh;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: var(--sidebar-width);
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            transition: width 0.2s ease;
+            z-index: 100;
+        }
+
+        .sidebar.collapsed {
+            width: var(--sidebar-collapsed);
+        }
+
+        .sidebar-header {
+            height: var(--header-height);
+            display: flex;
+            align-items: center;
+            padding: 0 12px;
+            border-bottom: 1px solid var(--border-color);
+            gap: 8px;
+        }
+
+        .sidebar-logo {
+            font-weight: 600;
+            font-size: 14px;
+            white-space: nowrap;
+            overflow: hidden;
+        }
+
+        .sidebar.collapsed .sidebar-logo {
+            display: none;
+        }
+
+        .sidebar-toggle {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-left: auto;
+        }
+
+        .sidebar-toggle:hover {
+            color: var(--text-primary);
+        }
+
+        .sidebar-nav {
+            flex: 1;
+            padding: 8px;
+            overflow-y: auto;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 10px;
+            border-radius: 4px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            margin-bottom: 2px;
+        }
+
+        .nav-item:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .nav-item.active {
+            background: var(--accent-dim);
+            color: var(--text-primary);
+        }
+
+        .nav-icon {
+            width: 18px;
+            height: 18px;
+            flex-shrink: 0;
+            opacity: 0.8;
+        }
+
+        .nav-label {
+            white-space: nowrap;
+            overflow: hidden;
+        }
+
+        .sidebar.collapsed .nav-label {
+            display: none;
+        }
+
+        .nav-section {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .nav-section-title {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-secondary);
+            padding: 0 10px 8px;
+        }
+
+        .sidebar.collapsed .nav-section-title {
+            display: none;
+        }
+
+        /* Main content area */
+        .main-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+
+        /* Content header */
+        .content-header {
+            height: var(--header-height);
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            gap: 12px;
+        }
+
+        .view-title {
+            font-weight: 500;
+            font-size: 13px;
+        }
+
+        .header-actions {
+            margin-left: auto;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .btn-icon {
+            background: none;
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            padding: 4px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .btn-icon:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .btn-icon.active {
+            background: var(--accent-dim);
+            border-color: var(--accent);
+            color: var(--text-primary);
+        }
+
+        /* Split pane container */
+        .pane-container {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+        }
+
+        .pane {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            position: relative;
+        }
+
+        .pane.hidden {
+            display: none;
+        }
+
+        .pane-content {
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .pane-content iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+            background: var(--bg-primary);
+        }
+
+        /* Resizer */
+        .pane-resizer {
+            width: 4px;
+            background: var(--border-color);
+            cursor: col-resize;
+            transition: background 0.15s ease;
+        }
+
+        .pane-resizer:hover,
+        .pane-resizer.dragging {
+            background: var(--accent);
+        }
+
+        /* Chat pane specific */
+        .chat-pane {
+            width: 400px;
+            min-width: 280px;
+            max-width: 50%;
+            border-left: 1px solid var(--border-color);
+        }
+
+        .chat-pane.hidden {
+            display: none;
+        }
+
+        .chat-header {
+            height: var(--header-height);
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            padding: 0 12px;
+            gap: 8px;
+        }
+
+        .chat-title {
+            font-weight: 500;
+            font-size: 12px;
+        }
+
+        .chat-close {
+            margin-left: auto;
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 4px;
+        }
+
+        .chat-close:hover {
+            color: var(--text-primary);
+        }
+
+        /* Agent status badges */
+        .agent-status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--text-secondary);
+        }
+
+        .status-dot.active {
+            background: var(--success);
+        }
+
+        .status-dot.busy {
+            background: var(--warning);
+        }
+
+        /* Mobile responsive */
+        @media (max-width: 768px) {
+            .sidebar {
+                position: fixed;
+                left: 0;
+                top: 0;
+                bottom: 0;
+                transform: translateX(-100%);
+                transition: transform 0.2s ease;
+            }
+
+            .sidebar.open {
+                transform: translateX(0);
+            }
+
+            .chat-pane {
+                position: fixed;
+                right: 0;
+                top: 0;
+                bottom: 0;
+                width: 100%;
+                max-width: 100%;
+                z-index: 200;
+            }
+
+            .mobile-menu-btn {
+                display: flex;
+            }
+        }
+
+        @media (min-width: 769px) {
+            .mobile-menu-btn {
+                display: none;
+            }
+        }
+
+        /* Loading state */
+        .loading-spinner {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: var(--text-secondary);
+        }
+
+        /* Keyboard shortcut hints */
+        .shortcut-hint {
+            font-size: 10px;
+            color: var(--text-secondary);
+            background: var(--bg-tertiary);
+            padding: 2px 4px;
+            border-radius: 2px;
+            margin-left: auto;
+        }
+
+        .sidebar.collapsed .shortcut-hint {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="cockpit">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <span class="sidebar-logo">Mission Control</span>
+                <button class="sidebar-toggle" id="sidebar-toggle" title="Toggle sidebar (Cmd+B)">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 12h18M3 6h18M3 18h18"/>
+                    </svg>
+                </button>
+            </div>
+            
+            <nav class="sidebar-nav">
+                <a class="nav-item" data-view="briefing" data-url="/briefing">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                        <line x1="16" y1="13" x2="8" y2="13"/>
+                        <line x1="16" y1="17" x2="8" y2="17"/>
+                    </svg>
+                    <span class="nav-label">Briefing</span>
+                    <span class="shortcut-hint">1</span>
+                </a>
+                
+                <a class="nav-item" data-view="email" data-url="/email">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                        <polyline points="22,6 12,13 2,6"/>
+                    </svg>
+                    <span class="nav-label">Email</span>
+                    <span class="shortcut-hint">2</span>
+                </a>
+                
+                <a class="nav-item" data-view="kanban" data-url="/">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="7" height="9"/>
+                        <rect x="14" y="3" width="7" height="5"/>
+                        <rect x="14" y="12" width="7" height="9"/>
+                        <rect x="3" y="16" width="7" height="5"/>
+                    </svg>
+                    <span class="nav-label">Kanban</span>
+                    <span class="shortcut-hint">3</span>
+                </a>
+                
+                <a class="nav-item" data-view="queue" data-url="/queue">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <path d="M12 6v6l4 2"/>
+                    </svg>
+                    <span class="nav-label">Agent Queue</span>
+                    <span class="shortcut-hint">4</span>
+                </a>
+
+                <div class="nav-section">
+                    <div class="nav-section-title">Tools</div>
+                    
+                    <a class="nav-item" data-view="api-costs" data-url="/static/api-costs.html">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="12" y1="1" x2="12" y2="23"/>
+                            <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                        </svg>
+                        <span class="nav-label">API Costs</span>
+                    </a>
+                </div>
+
+                <div class="nav-section">
+                    <div class="nav-section-title">Agents</div>
+                    
+                    <a class="nav-item" data-view="chat-jarvis" data-chat="jarvis">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                        </svg>
+                        <span class="nav-label">Jarvis</span>
+                        <span class="status-dot active"></span>
+                    </a>
+                    
+                    <a class="nav-item" data-view="chat-aria" data-chat="aria">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                        </svg>
+                        <span class="nav-label">Aria</span>
+                        <span class="status-dot"></span>
+                    </a>
+                    
+                    <a class="nav-item" data-view="chat-willb" data-chat="willb">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                        </svg>
+                        <span class="nav-label">Will B.</span>
+                        <span class="status-dot"></span>
+                    </a>
+                    
+                    <a class="nav-item" data-view="chat-peter" data-chat="peter">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                        </svg>
+                        <span class="nav-label">Peter</span>
+                        <span class="status-dot"></span>
+                    </a>
+                </div>
+            </nav>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-area">
+            <header class="content-header">
+                <button class="btn-icon mobile-menu-btn" id="mobile-menu-btn">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 12h18M3 6h18M3 18h18"/>
+                    </svg>
+                </button>
+                <span class="view-title" id="view-title">Briefing</span>
+                <div class="header-actions">
+                    <button class="btn-icon" id="split-toggle" title="Toggle chat panel (Cmd+/)">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="3" width="18" height="18" rx="2"/>
+                            <line x1="15" y1="3" x2="15" y2="21"/>
+                        </svg>
+                        <span>Chat</span>
+                    </button>
+                    <button class="btn-icon" id="refresh-btn" title="Refresh (R)">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="23 4 23 10 17 10"/>
+                            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                        </svg>
+                    </button>
+                    <button class="btn-icon" id="popout-btn" title="Open in new tab">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                            <polyline points="15 3 21 3 21 9"/>
+                            <line x1="10" y1="14" x2="21" y2="3"/>
+                        </svg>
+                    </button>
+                </div>
+            </header>
+
+            <div class="pane-container">
+                <!-- Primary content pane -->
+                <div class="pane" id="primary-pane">
+                    <div class="pane-content">
+                        <iframe id="content-frame" src="/briefing"></iframe>
+                    </div>
+                </div>
+
+                <!-- Resizer -->
+                <div class="pane-resizer hidden" id="pane-resizer"></div>
+
+                <!-- Chat pane -->
+                <div class="chat-pane hidden" id="chat-pane">
+                    <div class="chat-header">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                        </svg>
+                        <span class="chat-title" id="chat-title">Jarvis</span>
+                        <div class="agent-status">
+                            <span class="status-dot active"></span>
+                            <span id="chat-status">Active</span>
+                        </div>
+                        <button class="chat-close" id="chat-close" title="Close chat panel">
+                            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="18" y1="6" x2="6" y2="18"/>
+                                <line x1="6" y1="6" x2="18" y2="18"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="pane-content">
+                        <iframe id="chat-frame" src=""></iframe>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // Configuration - detect if on LAN or external
+        const WEBCHAT_BASE = '{{ webchat_url | default("", true) }}' || 
+            (window.location.hostname.includes('jwells.net') 
+                ? 'https://chat.jwells.net/webchat'  // External: needs separate tunnel
+                : `http://${window.location.hostname}:18789/webchat`);  // LAN: direct
+        const WEBCHAT_TOKEN = '{{ webchat_token | default("1eba89d56887b8dd1845e1d0898935f8ad378ffc28dd556c", true) }}';
+        
+        // State
+        let currentView = 'briefing';
+        let chatOpen = false;
+        let currentAgent = 'jarvis';
+        let sidebarCollapsed = localStorage.getItem('sidebar-collapsed') === 'true';
+
+        // Elements
+        const sidebar = document.getElementById('sidebar');
+        const sidebarToggle = document.getElementById('sidebar-toggle');
+        const mobileMenuBtn = document.getElementById('mobile-menu-btn');
+        const contentFrame = document.getElementById('content-frame');
+        const chatFrame = document.getElementById('chat-frame');
+        const chatPane = document.getElementById('chat-pane');
+        const paneResizer = document.getElementById('pane-resizer');
+        const splitToggle = document.getElementById('split-toggle');
+        const chatClose = document.getElementById('chat-close');
+        const chatTitle = document.getElementById('chat-title');
+        const viewTitle = document.getElementById('view-title');
+        const refreshBtn = document.getElementById('refresh-btn');
+        const popoutBtn = document.getElementById('popout-btn');
+        const navItems = document.querySelectorAll('.nav-item');
+
+        // View URL mapping
+        const viewUrls = {
+            'briefing': '/briefing',
+            'email': '/email',
+            'kanban': '/',
+            'queue': '/queue',
+            'api-costs': '/static/api-costs.html'
+        };
+
+        const viewTitles = {
+            'briefing': 'Briefing',
+            'email': 'Email',
+            'kanban': 'Kanban',
+            'queue': 'Agent Queue',
+            'api-costs': 'API Costs'
+        };
+
+        // Initialize
+        function init() {
+            // Restore sidebar state
+            if (sidebarCollapsed) {
+                sidebar.classList.add('collapsed');
+            }
+
+            // Set up nav items
+            navItems.forEach(item => {
+                item.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const view = item.dataset.view;
+                    const url = item.dataset.url;
+                    const chatAgent = item.dataset.chat;
+
+                    if (chatAgent) {
+                        openChat(chatAgent);
+                        updateNavActive(item);
+                    } else if (url) {
+                        loadView(view, url);
+                        updateNavActive(item);
+                    }
+                });
+            });
+
+            // Sidebar toggle
+            sidebarToggle.addEventListener('click', toggleSidebar);
+            mobileMenuBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+
+            // Chat controls
+            splitToggle.addEventListener('click', () => toggleChat());
+            chatClose.addEventListener('click', () => toggleChat(false));
+
+            // Refresh and popout
+            refreshBtn.addEventListener('click', () => contentFrame.src = contentFrame.src);
+            popoutBtn.addEventListener('click', () => window.open(contentFrame.src, '_blank'));
+
+            // Keyboard shortcuts
+            document.addEventListener('keydown', handleKeyboard);
+
+            // Resizer drag
+            setupResizer();
+
+            // Load initial view
+            const hash = window.location.hash.slice(1);
+            if (hash && viewUrls[hash]) {
+                loadView(hash, viewUrls[hash]);
+            } else {
+                loadView('briefing', '/briefing');
+            }
+        }
+
+        function loadView(view, url) {
+            currentView = view;
+            contentFrame.src = url;
+            viewTitle.textContent = viewTitles[view] || view;
+            window.location.hash = view;
+        }
+
+        function updateNavActive(activeItem) {
+            navItems.forEach(item => item.classList.remove('active'));
+            activeItem.classList.add('active');
+        }
+
+        function toggleSidebar() {
+            sidebarCollapsed = !sidebarCollapsed;
+            sidebar.classList.toggle('collapsed', sidebarCollapsed);
+            localStorage.setItem('sidebar-collapsed', sidebarCollapsed);
+        }
+
+        function toggleChat(open = !chatOpen) {
+            chatOpen = open;
+            chatPane.classList.toggle('hidden', !chatOpen);
+            paneResizer.classList.toggle('hidden', !chatOpen);
+            splitToggle.classList.toggle('active', chatOpen);
+
+            if (chatOpen && !chatFrame.src) {
+                loadChat(currentAgent);
+            }
+        }
+
+        function openChat(agent) {
+            currentAgent = agent;
+            loadChat(agent);
+            toggleChat(true);
+        }
+
+        function loadChat(agent) {
+            const agentNames = {
+                'jarvis': 'Jarvis',
+                'aria': 'Aria',
+                'willb': 'Will B.',
+                'peter': 'Peter',
+                'watson': 'Dr. Watson',
+                'elon': 'ELon'
+            };
+            
+            chatTitle.textContent = agentNames[agent] || agent;
+            
+            // Build webchat URL with token
+            let chatUrl = WEBCHAT_BASE;
+            if (WEBCHAT_TOKEN) {
+                chatUrl += `?token=${WEBCHAT_TOKEN}`;
+            }
+            if (agent !== 'jarvis') {
+                chatUrl += (WEBCHAT_TOKEN ? '&' : '?') + `agent=${agent}`;
+            }
+            
+            chatFrame.src = chatUrl;
+        }
+
+        function setupResizer() {
+            let startX, startWidth;
+
+            paneResizer.addEventListener('mousedown', (e) => {
+                startX = e.clientX;
+                startWidth = chatPane.offsetWidth;
+                paneResizer.classList.add('dragging');
+
+                document.addEventListener('mousemove', onDrag);
+                document.addEventListener('mouseup', onDragEnd);
+            });
+
+            function onDrag(e) {
+                const delta = startX - e.clientX;
+                const newWidth = Math.max(280, Math.min(window.innerWidth * 0.5, startWidth + delta));
+                chatPane.style.width = newWidth + 'px';
+            }
+
+            function onDragEnd() {
+                paneResizer.classList.remove('dragging');
+                document.removeEventListener('mousemove', onDrag);
+                document.removeEventListener('mouseup', onDragEnd);
+            }
+        }
+
+        function handleKeyboard(e) {
+            // Ignore if typing in input
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+            // Cmd/Ctrl + B: Toggle sidebar
+            if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
+                e.preventDefault();
+                toggleSidebar();
+            }
+
+            // Cmd/Ctrl + /: Toggle chat
+            if ((e.metaKey || e.ctrlKey) && e.key === '/') {
+                e.preventDefault();
+                toggleChat();
+            }
+
+            // Number keys 1-4: Switch views
+            if (!e.metaKey && !e.ctrlKey && !e.altKey) {
+                const viewMap = { '1': 'briefing', '2': 'email', '3': 'kanban', '4': 'queue' };
+                if (viewMap[e.key]) {
+                    const view = viewMap[e.key];
+                    loadView(view, viewUrls[view]);
+                    const navItem = document.querySelector(`[data-view="${view}"]`);
+                    if (navItem) updateNavActive(navItem);
+                }
+            }
+
+            // R: Refresh
+            if (e.key === 'r' && !e.metaKey && !e.ctrlKey) {
+                e.preventDefault();
+                contentFrame.src = contentFrame.src;
+            }
+        }
+
+        // Start
+        init();
+    </script>
+</body>
+</html>

@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="/static/favicon.png">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <title>Mission Control — Kanban</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="/static/ide-noir.css">
+    <link rel="stylesheet" href="/static/mission-control.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+    <!-- Focus Mode Overlay -->
+    <div id="focus-overlay" class="focus-overlay hidden">
+        <div class="focus-content">
+            <h1 id="focus-task-title" class="focus-title"></h1>
+            <div id="focus-timer" class="focus-timer">25:00</div>
+            <button id="stop-focus-btn" class="btn btn-danger">Exit Focus</button>
+        </div>
+    </div>
+
+    <!-- Quick Add Modal -->
+    <div id="quick-add-modal" class="modal hidden">
+        <div class="modal-content">
+            <h3 class="modal-title">Quick Add</h3>
+            <input type="text" id="quick-add-input" class="modal-input" placeholder="Task title...">
+            <div class="modal-actions">
+                <button id="quick-add-cancel" class="btn">Cancel</button>
+                <button id="quick-add-submit" class="btn btn-primary">Add</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Card Modal -->
+    <div id="edit-card-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 560px;">
+            <h3 class="modal-title">Edit Task</h3>
+            <input type="hidden" id="edit-task-id">
+            <div>
+                <label>Title</label>
+                <input type="text" id="edit-task-title" class="modal-input">
+            </div>
+            <div>
+                <label>Description</label>
+                <textarea id="edit-task-description" class="modal-input" rows="2"></textarea>
+            </div>
+            <div style="display: flex; gap: 12px;">
+                <div style="flex: 1;">
+                    <label>Energy</label>
+                    <select id="edit-task-energy" class="modal-input">
+                        <option value="low_stakes">Low Stakes</option>
+                        <option value="medium_effort">Medium Effort</option>
+                        <option value="high_burn">High Burn</option>
+                    </select>
+                </div>
+                <div style="flex: 1;">
+                    <label>Column</label>
+                    <select id="edit-task-column" class="modal-input">
+                    </select>
+                </div>
+            </div>
+            <div>
+                <label>Notes</label>
+                <textarea id="edit-task-notes" class="modal-input" rows="6" placeholder="Markdown supported..." style="font-family: var(--font-mono); font-size: 11px;"></textarea>
+            </div>
+            <div class="modal-actions">
+                <button id="edit-card-delete" class="btn btn-danger">Delete</button>
+                <div style="flex: 1;"></div>
+                <button id="edit-card-cancel" class="btn">Cancel</button>
+                <button id="edit-card-save" class="btn btn-primary">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notes Modal -->
+    <div id="notes-modal" class="modal hidden">
+        <div class="modal-content notes-modal-content">
+            <div class="notes-modal-header">
+                <h3 class="modal-title" id="notes-modal-title">Notes</h3>
+                <div class="notes-tabs">
+                    <button class="notes-tab active" data-tab="preview">Preview</button>
+                    <button class="notes-tab" data-tab="edit">Edit</button>
+                </div>
+            </div>
+            <input type="hidden" id="notes-task-id">
+            <div class="notes-content">
+                <div id="notes-preview" class="notes-preview markdown-body"></div>
+                <textarea id="notes-editor" class="notes-editor hidden" placeholder="Write notes in Markdown..."></textarea>
+            </div>
+            <div class="modal-actions">
+                <button id="notes-close" class="btn">Close</button>
+                <button id="notes-save" class="btn btn-primary">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Navigation -->
+    <nav class="nav-bar">
+        <div class="nav-container">
+            <div class="nav-left">
+                <span class="nav-title">Mission Control</span>
+                <div class="nav-tabs">
+                    <a href="/" class="nav-tab active">Kanban</a>
+                    <a href="/briefing" class="nav-tab">Briefing</a>
+                    <a href="/email" class="nav-tab">Email</a>
+                    <a href="/queue" class="nav-tab">Queue</a>
+                    <a href="/crm" class="nav-tab">CRM</a>
+                    <a href="/synapse" class="nav-tab">Synapse</a>
+                    <a href="/activity" class="nav-tab">Activity</a>
+                    <a href="/rbot" class="nav-tab">Research</a>
+                    <a href="/atlas" class="nav-tab">Atlas</a>
+                    <a href="https://jarvis.jwells.net/activity" class="nav-tab" target="_blank">Jarvis</a>
+                </div>
+            </div>
+            <div class="nav-right">
+                <button id="sync-btn" class="btn">Sync</button>
+                <button id="reset-columns-btn" class="btn" title="Reset column order">Reset</button>
+                <button id="focus-mode-btn" class="btn btn-warning">NOW</button>
+                <span id="last-sync" class="text-muted font-mono" style="font-size: 10px;">—</span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Page Header -->
+    <header class="page-header">
+        <h2>Kanban</h2>
+        <span id="task-count" class="task-count">0 tasks</span>
+    </header>
+
+    <!-- Brief -->
+    <section class="brief-section">
+        <h2 class="brief-header">Today's Brief</h2>
+        <div id="brief-content" class="brief-content">Loading...</div>
+    </section>
+
+    <!-- Timeline -->
+    <section class="timeline-section">
+        <h2 class="timeline-header">Timeline</h2>
+        <div id="timeline-bar" class="timeline-bar"></div>
+    </section>
+
+    <!-- Kanban Board -->
+    <main class="kanban-wrapper">
+        <div class="kanban-board" id="kanban-board">
+            <!-- Columns rendered dynamically by JS -->
+        </div>
+
+        <!-- Collapsed columns stack -->
+        <div class="collapsed-stack" id="collapsed-stack"></div>
+    </main>
+
+    <!-- Task Card Template -->
+    <template id="task-card-template">
+        <div class="task-card" draggable="true">
+            <div class="task-header">
+                <div class="task-energy"></div>
+                <h4 class="task-title"></h4>
+                <button class="task-edit-btn" title="Edit">✎</button>
+                <button class="task-delete-quick" title="Delete">×</button>
+            </div>
+            <p class="task-description"></p>
+            <div class="task-footer">
+                <span class="task-source"></span>
+                <div class="task-actions">
+                    <button class="task-snooze-btn" title="Snooze">⏰</button>
+                    <button class="task-notes-btn" title="Notes">📝</button>
+                    <button class="task-complete-quick" title="Complete">✓</button>
+                    <button class="task-focus-btn" title="Focus">NOW</button>
+                    <a class="task-link" target="_blank" title="Source">↗</a>
+                </div>
+            </div>
+            <div class="task-health"></div>
+        </div>
+    </template>
+
+    <!-- Add Card Template -->
+    <template id="add-card-template">
+        <div class="add-card-form">
+            <input type="text" class="add-card-input" placeholder="Task title...">
+            <div class="add-card-actions">
+                <button class="add-card-submit">Add</button>
+                <button class="add-card-cancel">Cancel</button>
+            </div>
+        </div>
+    </template>
+
+    <!-- Collapsed Column Template -->
+    <template id="collapsed-column-template">
+        <div class="collapsed-column" data-column="">
+            <span class="collapsed-title"></span>
+            <span class="collapsed-count font-mono"></span>
+        </div>
+    </template>
+
+    <!-- Snooze Modal -->
+    <div id="snooze-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Snooze Task</h3>
+                <button class="modal-close" onclick="window.kanban.closeSnoozeModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <p id="snooze-task-title" style="margin-bottom: 1rem; color: var(--text-secondary);"></p>
+                <div class="snooze-options" style="display: flex; flex-direction: column; gap: 0.5rem;">
+                    <button class="snooze-option" onclick="window.kanban.snoozeTask(4, 'hours')">Later today (+4h)</button>
+                    <button class="snooze-option" onclick="window.kanban.snoozeTask(1, 'days')">Tomorrow</button>
+                    <button class="snooze-option" onclick="window.kanban.snoozeTask(3, 'days')">In 3 days</button>
+                    <button class="snooze-option" onclick="window.kanban.snoozeTask(7, 'days')">Next week</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="/static/favicon.png">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <title>Triage Mode - Mission Control</title>
+    <link rel="stylesheet" href="/static/ide-noir.css">
+    <link rel="stylesheet" href="/static/mission-control.css">
+    <style>
+        /* Legacy triage-specific styles - TODO: migrate to mission-control.css */
+        :root {
+            --bg-primary: #0f1419;
+            --bg-secondary: #1a1f2e;
+            --bg-card: #232936;
+            --border: #2d3748;
+            --text-primary: #ffffff;
+            --text-secondary: #a0aec0;
+            --text-muted: #718096;
+            --accent: #00d4aa;
+            --priority: #f59e0b;
+            --danger: #ef4444;
+        }
+        
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .nav {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .nav-title { font-size: 1.25rem; font-weight: 600; }
+        .nav-links { display: flex; gap: 1rem; }
+        .nav-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+        }
+        .nav-links a:hover { background: var(--bg-card); color: var(--text-primary); }
+        
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+        }
+        
+        .triage-container {
+            max-width: 700px;
+            width: 100%;
+        }
+        
+        .progress-bar {
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            height: 8px;
+            margin-bottom: 1rem;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            background: linear-gradient(90deg, var(--accent), #00ff88);
+            height: 100%;
+            transition: width 0.3s ease;
+        }
+        
+        .progress-text {
+            text-align: center;
+            color: var(--text-muted);
+            margin-bottom: 2rem;
+            font-size: 0.875rem;
+        }
+        
+        .email-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+        }
+        
+        .email-card.priority {
+            border-color: var(--priority);
+            box-shadow: 0 0 20px rgba(245, 158, 11, 0.1);
+        }
+        
+        .email-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 1rem;
+        }
+        
+        .email-from {
+            font-weight: 600;
+            font-size: 1.1rem;
+        }
+        
+        .email-from-address {
+            color: var(--text-muted);
+            font-size: 0.875rem;
+        }
+        
+        .priority-badge {
+            background: var(--priority);
+            color: black;
+            padding: 0.25rem 0.75rem;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        
+        .email-subject {
+            font-size: 1.5rem;
+            font-weight: 500;
+            margin-bottom: 1rem;
+            line-height: 1.3;
+        }
+        
+        .email-preview {
+            color: var(--text-secondary);
+            line-height: 1.6;
+            margin-bottom: 1rem;
+        }
+        
+        .email-meta {
+            color: var(--text-muted);
+            font-size: 0.875rem;
+            display: flex;
+            gap: 1rem;
+        }
+        
+        .actions {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
+        }
+        
+        .action-btn {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 1.25rem 1rem;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.5rem;
+            transition: all 0.15s ease;
+        }
+        
+        .action-btn:hover {
+            background: var(--bg-secondary);
+            border-color: var(--accent);
+            transform: translateY(-2px);
+        }
+        
+        .action-btn .key {
+            background: var(--border);
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-family: monospace;
+        }
+        
+        .action-btn.archive:hover { border-color: var(--text-muted); }
+        .action-btn.snooze:hover { border-color: #3b82f6; }
+        .action-btn.task:hover { border-color: var(--priority); }
+        .action-btn.reply:hover { border-color: var(--accent); }
+        
+        .empty-state {
+            text-align: center;
+            padding: 4rem 2rem;
+        }
+        
+        .empty-state h2 {
+            font-size: 2rem;
+            margin-bottom: 1rem;
+        }
+        
+        .empty-state p {
+            color: var(--text-secondary);
+        }
+        
+        .shortcuts-hint {
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.875rem;
+            margin-top: 1rem;
+        }
+        
+        .shortcuts-hint kbd {
+            background: var(--bg-card);
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            margin: 0 0.25rem;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 4rem;
+            color: var(--text-muted);
+        }
+        
+        .contacts-link {
+            text-align: center;
+            margin-top: 2rem;
+        }
+        
+        .contacts-link a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+        
+        .contacts-link a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <nav class="nav">
+        <div class="nav-title">Triage Mode</div>
+        <div class="nav-links">
+            <a href="/">Kanban</a>
+            <a href="/briefing">Briefing</a>
+            <a href="/email">Email</a>
+            <a href="/queue">Queue</a>
+        </div>
+    </nav>
+    
+    <main class="main">
+        <div class="triage-container">
+            <div id="loading" class="loading">Loading emails...</div>
+            
+            <div id="triage-content" style="display: none;">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progress-fill"></div>
+                </div>
+                <div class="progress-text" id="progress-text">0 / 0 emails processed</div>
+                
+                <div id="email-card" class="email-card">
+                    <!-- Email content populated by JS -->
+                </div>
+                
+                <div class="actions">
+                    <button class="action-btn archive" onclick="triageAction('archive')">
+                        <span>📥 Archive</span>
+                        <span class="key">A</span>
+                    </button>
+                    <button class="action-btn snooze" onclick="triageAction('snooze')">
+                        <span>⏰ Snooze</span>
+                        <span class="key">S</span>
+                    </button>
+                    <button class="action-btn task" onclick="triageAction('task')">
+                        <span>📋 Task</span>
+                        <span class="key">T</span>
+                    </button>
+                    <button class="action-btn reply" onclick="triageAction('reply')">
+                        <span>↩️ Reply</span>
+                        <span class="key">R</span>
+                    </button>
+                </div>
+                
+                <div class="shortcuts-hint">
+                    Keyboard: <kbd>A</kbd> Archive <kbd>S</kbd> Snooze <kbd>T</kbd> Task <kbd>R</kbd> Reply <kbd>→</kbd> Skip
+                </div>
+                
+                <div class="contacts-link">
+                    <a href="/contacts">Manage priority contacts →</a>
+                </div>
+            </div>
+            
+            <div id="empty-state" class="empty-state" style="display: none;">
+                <h2>🎉 Inbox Zero!</h2>
+                <p>All emails triaged. You're caught up.</p>
+                <div class="contacts-link" style="margin-top: 2rem;">
+                    <a href="/briefing">← Back to Briefing</a>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        let queue = [];
+        let currentIndex = 0;
+        let totalProcessed = 0;
+        
+        async function loadQueue() {
+            try {
+                const response = await fetch('/api/triage');
+                const data = await response.json();
+                queue = data.queue;
+                
+                document.getElementById('loading').style.display = 'none';
+                
+                if (queue.length === 0) {
+                    document.getElementById('empty-state').style.display = 'block';
+                } else {
+                    document.getElementById('triage-content').style.display = 'block';
+                    showCurrentEmail();
+                }
+            } catch (error) {
+                console.error('Failed to load triage queue:', error);
+                document.getElementById('loading').textContent = 'Failed to load emails';
+            }
+        }
+        
+        function showCurrentEmail() {
+            if (currentIndex >= queue.length) {
+                document.getElementById('triage-content').style.display = 'none';
+                document.getElementById('empty-state').style.display = 'block';
+                return;
+            }
+            
+            const email = queue[currentIndex];
+            const card = document.getElementById('email-card');
+            
+            card.className = 'email-card' + (email.is_priority ? ' priority' : '');
+            card.innerHTML = `
+                <div class="email-header">
+                    <div>
+                        <div class="email-from">${escapeHtml(email.from_name)}</div>
+                        <div class="email-from-address">${escapeHtml(email.from_email)}</div>
+                    </div>
+                    ${email.is_priority ? '<span class="priority-badge">⭐ Priority Contact</span>' : ''}
+                </div>
+                <div class="email-subject">${escapeHtml(email.subject)}</div>
+                <div class="email-preview">${escapeHtml(email.preview)}...</div>
+                <div class="email-meta">
+                    <span>${formatDate(email.received)}</span>
+                    ${email.web_link ? `<a href="${email.web_link}" target="_blank" style="color: var(--accent);">Open in Outlook →</a>` : ''}
+                </div>
+            `;
+            
+            updateProgress();
+        }
+        
+        function updateProgress() {
+            const total = queue.length;
+            const processed = totalProcessed;
+            const remaining = total - currentIndex;
+            
+            const percentage = total > 0 ? (processed / total) * 100 : 0;
+            document.getElementById('progress-fill').style.width = percentage + '%';
+            document.getElementById('progress-text').textContent = 
+                `${processed} processed, ${remaining} remaining`;
+        }
+        
+        async function triageAction(action) {
+            if (currentIndex >= queue.length) return;
+            
+            const email = queue[currentIndex];
+            
+            try {
+                await fetch(`/api/triage/${email.id}?action=${action}`, { method: 'POST' });
+                
+                // If creating task, also create it
+                if (action === 'task') {
+                    await fetch('/api/tasks', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            title: `📧 ${email.subject}`,
+                            column: 'todo'
+                        })
+                    });
+                }
+                
+                // If reply, open email
+                if (action === 'reply' && email.web_link) {
+                    window.open(email.web_link, '_blank');
+                }
+                
+                totalProcessed++;
+                currentIndex++;
+                showCurrentEmail();
+            } catch (error) {
+                console.error('Triage action failed:', error);
+            }
+        }
+        
+        function skipEmail() {
+            currentIndex++;
+            showCurrentEmail();
+        }
+        
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str.replace(/[&<>"']/g, m => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            }[m]));
+        }
+        
+        function formatDate(dateStr) {
+            if (!dateStr) return '';
+            const date = new Date(dateStr);
+            return date.toLocaleDateString('en-US', { 
+                month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
+            });
+        }
+        
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            
+            switch(e.key.toLowerCase()) {
+                case 'a': triageAction('archive'); break;
+                case 's': triageAction('snooze'); break;
+                case 't': triageAction('task'); break;
+                case 'r': triageAction('reply'); break;
+                case 'arrowright': skipEmail(); break;
+            }
+        });
+        
+        // Load on page load
+        loadQueue();
+    </script>
+</body>
+</html>

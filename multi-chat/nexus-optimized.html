@@ -1,0 +1,879 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>nexus - optimized</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg-deep:    #06090f;
+  --bg:         #0a0f18;
+  --bg-raised:  #0e1422;
+  --bg-surface: #121a2a;
+  --border:     #1a2440;
+  --border-hi:  #243052;
+  --text:       #c8d3e8;
+  --text-dim:   #4e5d7a;
+  --text-muted: #2d3a54;
+  --cyan:       #00e5ff;
+  --green:      #00e676;
+  --yellow:     #ffab00;
+  --red:        #ff3d3d;
+  --pink:       #ff4081;
+  --purple:     #b388ff;
+  --orange:     #ff9100;
+  --blue:       #448aff;
+  --mono: 'IBM Plex Mono', 'Menlo', monospace;
+  --sans: 'DM Sans', system-ui, sans-serif;
+  --panel-radius: 8px;
+}
+
+* { 
+  box-sizing: border-box; 
+  margin: 0; 
+  padding: 0; 
+}
+
+html, body { 
+  height: 100%; 
+  overflow: hidden; 
+}
+
+body {
+  background: var(--bg-deep);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ═══ PERFORMANCE OPTIMIZATIONS ═══ */
+
+.chat-container {
+  /* Force GPU layer for smooth operations */
+  transform: translateZ(0);
+  will-change: scroll-position;
+  /* Optimize scrolling on touch devices */
+  overflow-scrolling: touch;
+  -webkit-overflow-scrolling: touch;
+  /* Use hardware acceleration */
+  backface-visibility: hidden;
+  perspective: 1000px;
+}
+
+.message {
+  /* Optimize for animations */
+  will-change: transform, opacity;
+  /* Prevent layout thrashing */
+  transform: translateZ(0);
+  /* Smooth appear animation */
+  animation: messageAppear 150ms ease-out;
+}
+
+.message.no-animation,
+.chat-container.streaming .message {
+  animation: none;
+}
+
+/* Virtual scrolling container */
+.message-viewport {
+  position: relative;
+  height: 100%;
+  overflow: auto;
+  scroll-behavior: auto; /* Disable smooth scroll for instant positioning */
+}
+
+.message-window {
+  position: relative;
+  /* Dynamic height set by JS based on total message count */
+}
+
+.visible-messages {
+  /* Dynamic positioning via transform for virtual scrolling */
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+
+/* ═══ ANIMATIONS ═══ */
+
+@keyframes messageAppear {
+  from { 
+    opacity: 0; 
+    transform: translateY(4px) translateZ(0);
+  }
+  to { 
+    opacity: 1; 
+    transform: translateY(0) translateZ(0);
+  }
+}
+
+@keyframes pulse { 
+  0%,100% { opacity: 1; } 
+  50% { opacity: 0.4; } 
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Copy original styles for layout... */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-hi); }
+
+/* Layout styles from original */
+.top-bar {
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  padding: 0 16px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.main-content {
+  display: flex;
+  height: calc(100vh - 48px);
+  background: var(--bg-deep);
+}
+
+.sidebar {
+  width: 280px;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-raised);
+  position: relative;
+}
+
+.messages {
+  flex: 1;
+  padding: 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.message {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  line-height: 1.4;
+}
+
+.message.user {
+  background: var(--bg);
+  border-color: var(--cyan);
+}
+
+.message.assistant {
+  background: var(--bg-surface);
+  border-color: var(--border);
+}
+
+.message.system {
+  background: var(--bg-raised);
+  border-color: var(--text-muted);
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.message-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.message-content {
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.input-area {
+  border-top: 1px solid var(--border);
+  padding: 16px;
+  background: var(--bg);
+}
+
+.input-field {
+  width: 100%;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px 12px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.input-field:focus {
+  outline: none;
+  border-color: var(--cyan);
+}
+
+.agent-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.agent-item {
+  padding: 8px 12px;
+  margin-bottom: 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 75ms ease;
+}
+
+.agent-item:hover {
+  background: var(--bg-raised);
+  border-color: var(--border);
+}
+
+.agent-item.active {
+  background: var(--bg-surface);
+  border-color: var(--cyan);
+  color: var(--cyan);
+}
+
+.agent-name {
+  font-weight: 500;
+  font-size: 12px;
+}
+
+.agent-status {
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+.sidebar-header {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+/* Performance monitoring styles */
+.perf-indicator {
+  position: fixed;
+  bottom: 10px;
+  right: 10px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  z-index: 1000;
+}
+
+.perf-indicator.slow {
+  color: var(--red);
+}
+</style>
+</head>
+
+<body>
+  <!-- Performance indicator -->
+  <div id="perfIndicator" class="perf-indicator">
+    <span id="renderTime">0ms</span> | 
+    <span id="messageCount">0 msgs</span> | 
+    <span id="memoryUsage">0MB</span>
+  </div>
+
+  <!-- Message templates (hidden, used for cloning) -->
+  <template id="user-message-template">
+    <div class="message user">
+      <div class="message-header">
+        <span class="sender">User</span>
+        <span class="timestamp"></span>
+      </div>
+      <div class="message-content"></div>
+    </div>
+  </template>
+
+  <template id="assistant-message-template">
+    <div class="message assistant">
+      <div class="message-header">
+        <span class="sender">Assistant</span>
+        <span class="timestamp"></span>
+      </div>
+      <div class="message-content"></div>
+    </div>
+  </template>
+
+  <template id="system-message-template">
+    <div class="message system">
+      <div class="message-header">
+        <span class="sender">System</span>
+        <span class="timestamp"></span>
+      </div>
+      <div class="message-content"></div>
+    </div>
+  </template>
+
+  <div class="top-bar">
+    <div>
+      <strong>Nexus</strong> — Multi-Agent Chat (Optimized)
+    </div>
+    <div>
+      <button id="perfToggle">Performance Monitor</button>
+    </div>
+  </div>
+
+  <div class="main-content">
+    <div class="sidebar">
+      <div class="sidebar-header">
+        Agents
+      </div>
+      <div id="agentList" class="agent-list">
+        <!-- Agents populated by JS -->
+      </div>
+    </div>
+
+    <div class="chat-area">
+      <div id="messages" class="messages chat-container message-viewport">
+        <div class="message-window">
+          <div class="visible-messages">
+            <!-- Messages populated by optimized renderer -->
+          </div>
+        </div>
+      </div>
+      <div class="input-area">
+        <input 
+          id="messageInput" 
+          class="input-field" 
+          placeholder="Type a message..." 
+          autocomplete="off"
+        />
+      </div>
+    </div>
+  </div>
+
+  <script>
+// ═══ PERFORMANCE-OPTIMIZED MULTI-CHAT ═══
+
+class OptimizedMultiChat {
+  constructor() {
+    this.agents = new Map();
+    this.activeAgentId = null;
+    this.messagePool = new MessagePool(50);
+    this.performanceMonitor = new PerformanceMonitor();
+    this.virtualScroller = new VirtualScroller();
+    this.streamingBatcher = new MessageBatcher(50);
+    
+    this.initializeUI();
+    this.initializeEventListeners();
+    
+    // Demo agents
+    this.addAgent('jarvis', 'Jarvis', 'ws://localhost:8080/jarvis');
+    this.addAgent('atlas', 'Atlas', 'ws://localhost:8080/atlas');
+    this.addAgent('aria', 'Aria', 'ws://localhost:8080/aria');
+    
+    this.setActiveAgent('jarvis');
+  }
+
+  initializeUI() {
+    this.agentListEl = document.getElementById('agentList');
+    this.messagesEl = document.getElementById('messages');
+    this.inputEl = document.getElementById('messageInput');
+    this.messageWindowEl = this.messagesEl.querySelector('.message-window');
+    this.visibleMessagesEl = this.messagesEl.querySelector('.visible-messages');
+  }
+
+  initializeEventListeners() {
+    // Input handling
+    this.inputEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        this.sendMessage();
+      }
+    });
+
+    // Scroll handling (throttled)
+    this.messagesEl.addEventListener('scroll', this.throttle((e) => {
+      this.handleScroll();
+    }, 16)); // ~60fps
+
+    // Performance toggle
+    document.getElementById('perfToggle').addEventListener('click', () => {
+      this.performanceMonitor.toggle();
+    });
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.key === 'k') {
+        e.preventDefault();
+        this.inputEl.focus();
+      }
+    });
+  }
+
+  addAgent(id, name, url) {
+    const agent = {
+      id,
+      name,
+      url,
+      messages: [],
+      status: 'disconnected',
+      unread: 0,
+      isAtBottom: true,
+      scrollPosition: 0
+    };
+
+    this.agents.set(id, agent);
+    this.renderAgentList();
+  }
+
+  setActiveAgent(agentId) {
+    if (this.activeAgentId) {
+      this.saveAgentState(this.activeAgentId);
+    }
+
+    this.activeAgentId = agentId;
+    this.restoreAgentState(agentId);
+    this.renderAgentList();
+    this.renderMessages();
+  }
+
+  saveAgentState(agentId) {
+    const agent = this.agents.get(agentId);
+    if (agent) {
+      agent.scrollPosition = this.messagesEl.scrollTop;
+      agent.isAtBottom = this.isScrollAtBottom();
+    }
+  }
+
+  restoreAgentState(agentId) {
+    const agent = this.agents.get(agentId);
+    if (agent) {
+      agent.unread = 0;
+      // Scroll position will be restored in renderMessages()
+    }
+  }
+
+  isScrollAtBottom(threshold = 50) {
+    const { scrollTop, scrollHeight, clientHeight } = this.messagesEl;
+    return (scrollHeight - scrollTop - clientHeight) < threshold;
+  }
+
+  handleScroll() {
+    if (this.activeAgentId) {
+      const agent = this.agents.get(this.activeAgentId);
+      if (agent) {
+        agent.isAtBottom = this.isScrollAtBottom();
+        agent.scrollPosition = this.messagesEl.scrollTop;
+      }
+    }
+  }
+
+  snapToBottom() {
+    // Instant scroll - no animation
+    this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+  }
+
+  addMessage(agentId, type, content, sender = null) {
+    const startTime = performance.now();
+
+    const agent = this.agents.get(agentId);
+    if (!agent) return;
+
+    const message = {
+      id: Date.now() + Math.random(),
+      type,
+      content,
+      sender: sender || type,
+      timestamp: new Date().toISOString()
+    };
+
+    agent.messages.push(message);
+
+    // Update unread count if not active
+    if (agentId !== this.activeAgentId) {
+      agent.unread++;
+    }
+
+    // Render if active agent
+    if (agentId === this.activeAgentId) {
+      this.renderNewMessage(message);
+    }
+
+    this.renderAgentList();
+
+    // Performance monitoring
+    const duration = performance.now() - startTime;
+    this.performanceMonitor.recordMessageRender(duration);
+  }
+
+  renderNewMessage(message) {
+    const messageEl = this.messagePool.getMessage(message.type);
+    this.populateMessage(messageEl, message);
+
+    // Add smooth appear animation for single messages
+    if (!this.visibleMessagesEl.classList.contains('streaming')) {
+      messageEl.classList.remove('no-animation');
+    } else {
+      messageEl.classList.add('no-animation');
+    }
+
+    this.visibleMessagesEl.appendChild(messageEl);
+
+    // Scroll to bottom if user was already at bottom
+    const agent = this.agents.get(this.activeAgentId);
+    if (agent && agent.isAtBottom) {
+      requestAnimationFrame(() => {
+        this.snapToBottom();
+        agent.isAtBottom = true;
+      });
+    }
+  }
+
+  populateMessage(element, message) {
+    const timestampEl = element.querySelector('.timestamp');
+    const contentEl = element.querySelector('.message-content');
+    const senderEl = element.querySelector('.sender');
+
+    if (timestampEl) timestampEl.textContent = new Date(message.timestamp).toLocaleTimeString();
+    if (contentEl) contentEl.textContent = message.content;
+    if (senderEl) senderEl.textContent = message.sender;
+
+    element.dataset.messageId = message.id;
+    element.className = `message ${message.type}`;
+  }
+
+  renderMessages() {
+    const agent = this.agents.get(this.activeAgentId);
+    if (!agent) return;
+
+    const startTime = performance.now();
+
+    // Clear current messages efficiently
+    this.clearMessages();
+
+    // Use document fragment for efficient DOM building
+    const fragment = document.createDocumentFragment();
+
+    // Render all messages (for now - virtual scrolling can be added later)
+    agent.messages.forEach(message => {
+      const messageEl = this.messagePool.getMessage(message.type);
+      this.populateMessage(messageEl, message);
+      messageEl.classList.add('no-animation'); // No animation for bulk render
+      fragment.appendChild(messageEl);
+    });
+
+    this.visibleMessagesEl.appendChild(fragment);
+
+    // Restore scroll position
+    requestAnimationFrame(() => {
+      if (agent.isAtBottom || agent.messages.length === 0) {
+        this.snapToBottom();
+      } else {
+        this.messagesEl.scrollTop = agent.scrollPosition || 0;
+      }
+    });
+
+    // Performance monitoring
+    const duration = performance.now() - startTime;
+    this.performanceMonitor.recordMessageRender(duration);
+    this.performanceMonitor.updateMessageCount(agent.messages.length);
+  }
+
+  clearMessages() {
+    // Efficiently clear messages and return elements to pool
+    const messages = this.visibleMessagesEl.querySelectorAll('.message');
+    messages.forEach(el => {
+      this.messagePool.returnMessage(el);
+    });
+    this.visibleMessagesEl.innerHTML = '';
+  }
+
+  renderAgentList() {
+    this.agentListEl.innerHTML = '';
+
+    this.agents.forEach((agent, id) => {
+      const agentEl = document.createElement('div');
+      agentEl.className = `agent-item ${id === this.activeAgentId ? 'active' : ''}`;
+      agentEl.onclick = () => this.setActiveAgent(id);
+
+      const unreadBadge = agent.unread > 0 ? ` (${agent.unread})` : '';
+      
+      agentEl.innerHTML = `
+        <div class="agent-name">${agent.name}${unreadBadge}</div>
+        <div class="agent-status">${agent.status}</div>
+      `;
+
+      this.agentListEl.appendChild(agentEl);
+    });
+  }
+
+  sendMessage() {
+    const content = this.inputEl.value.trim();
+    if (!content || !this.activeAgentId) return;
+
+    this.addMessage(this.activeAgentId, 'user', content);
+    this.inputEl.value = '';
+
+    // Simulate agent response
+    setTimeout(() => {
+      this.addMessage(this.activeAgentId, 'assistant', 
+        `Echo from ${this.agents.get(this.activeAgentId).name}: ${content}`);
+    }, 500 + Math.random() * 1000);
+  }
+
+  // Utility function for throttling
+  throttle(func, delay) {
+    let timeoutId;
+    let lastExecTime = 0;
+    return function (...args) {
+      const currentTime = Date.now();
+      
+      if (currentTime - lastExecTime > delay) {
+        func.apply(this, args);
+        lastExecTime = currentTime;
+      } else {
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => {
+          func.apply(this, args);
+          lastExecTime = Date.now();
+        }, delay - (currentTime - lastExecTime));
+      }
+    };
+  }
+}
+
+// ═══ MESSAGE POOL FOR EFFICIENT DOM REUSE ═══
+
+class MessagePool {
+  constructor(maxRetained = 50) {
+    this.pools = {
+      user: [],
+      assistant: [],
+      system: []
+    };
+    this.maxRetained = maxRetained;
+    this.templates = {
+      user: document.getElementById('user-message-template'),
+      assistant: document.getElementById('assistant-message-template'),
+      system: document.getElementById('system-message-template')
+    };
+  }
+
+  getMessage(type) {
+    const pool = this.pools[type];
+    if (pool && pool.length > 0) {
+      return pool.pop();
+    }
+    
+    // Create new from template
+    const template = this.templates[type];
+    return template.content.cloneNode(true).querySelector('.message');
+  }
+
+  returnMessage(element) {
+    const type = element.classList.contains('user') ? 'user' :
+                 element.classList.contains('assistant') ? 'assistant' : 'system';
+    
+    // Reset element state
+    element.classList.remove('no-animation');
+    element.removeAttribute('data-message-id');
+    
+    // Clear content
+    const contentEl = element.querySelector('.message-content');
+    const timestampEl = element.querySelector('.timestamp');
+    if (contentEl) contentEl.textContent = '';
+    if (timestampEl) timestampEl.textContent = '';
+
+    // Return to pool if under limit
+    const pool = this.pools[type];
+    if (pool && pool.length < this.maxRetained) {
+      pool.push(element);
+    }
+  }
+}
+
+// ═══ PERFORMANCE MONITORING ═══
+
+class PerformanceMonitor {
+  constructor() {
+    this.isVisible = false;
+    this.metrics = {
+      renderTimes: [],
+      messageCount: 0,
+      startTime: Date.now()
+    };
+    this.indicatorEl = document.getElementById('perfIndicator');
+    this.renderTimeEl = document.getElementById('renderTime');
+    this.messageCountEl = document.getElementById('messageCount');
+    this.memoryEl = document.getElementById('memoryUsage');
+    
+    this.updateDisplay();
+    setInterval(() => this.updateDisplay(), 1000);
+  }
+
+  toggle() {
+    this.isVisible = !this.isVisible;
+    this.indicatorEl.style.display = this.isVisible ? 'block' : 'none';
+  }
+
+  recordMessageRender(duration) {
+    this.metrics.renderTimes.push(duration);
+    
+    // Keep only recent measurements
+    if (this.metrics.renderTimes.length > 100) {
+      this.metrics.renderTimes.shift();
+    }
+
+    // Warn if slow
+    if (duration > 16) {
+      console.warn(`Slow message render: ${duration.toFixed(2)}ms`);
+      this.indicatorEl.classList.add('slow');
+      setTimeout(() => {
+        this.indicatorEl.classList.remove('slow');
+      }, 1000);
+    }
+  }
+
+  updateMessageCount(count) {
+    this.metrics.messageCount = count;
+  }
+
+  updateDisplay() {
+    if (!this.isVisible) return;
+
+    const avgRenderTime = this.metrics.renderTimes.length > 0 
+      ? this.metrics.renderTimes.reduce((a, b) => a + b, 0) / this.metrics.renderTimes.length 
+      : 0;
+
+    this.renderTimeEl.textContent = `${avgRenderTime.toFixed(1)}ms`;
+    this.messageCountEl.textContent = `${this.metrics.messageCount} msgs`;
+    
+    // Estimate memory usage
+    if (performance.memory) {
+      const mb = performance.memory.usedJSHeapSize / 1024 / 1024;
+      this.memoryEl.textContent = `${mb.toFixed(1)}MB`;
+    }
+  }
+}
+
+// ═══ VIRTUAL SCROLLER (PLACEHOLDER FOR FUTURE) ═══
+
+class VirtualScroller {
+  constructor() {
+    this.itemHeight = 60; // Estimated message height
+    this.visibleCount = 50; // Messages to keep rendered
+    this.bufferCount = 10; // Extra messages for smooth scrolling
+  }
+
+  // TODO: Implement virtual scrolling for very long chat histories
+  updateVirtualView(messages, scrollTop, containerHeight) {
+    // Future optimization for chats with 1000+ messages
+  }
+}
+
+// ═══ MESSAGE BATCHING FOR STREAMING ═══
+
+class MessageBatcher {
+  constructor(flushInterval = 50) {
+    this.pending = [];
+    this.timer = null;
+    this.flushInterval = flushInterval;
+    this.callback = null;
+  }
+
+  add(message, callback) {
+    this.pending.push(message);
+    this.callback = callback;
+    
+    if (!this.timer) {
+      this.timer = setTimeout(() => {
+        this.flush();
+      }, this.flushInterval);
+    }
+  }
+
+  flush() {
+    if (this.pending.length > 0 && this.callback) {
+      this.callback(this.pending);
+      this.pending = [];
+    }
+    this.timer = null;
+  }
+}
+
+// ═══ INITIALIZE APP ═══
+
+let app;
+document.addEventListener('DOMContentLoaded', () => {
+  app = new OptimizedMultiChat();
+
+  // Demo: Add some messages
+  setTimeout(() => {
+    app.addMessage('jarvis', 'system', 'Connected to Jarvis');
+    app.addMessage('jarvis', 'assistant', 'Hello! How can I help you today?');
+  }, 500);
+
+  // Demo: Simulate streaming
+  setTimeout(() => {
+    const longMessage = 'This is a longer message that simulates streaming text being added to the chat interface. '.repeat(5);
+    app.addMessage('jarvis', 'assistant', longMessage);
+  }, 1500);
+});
+
+// ═══ DEMO FUNCTIONS ═══
+
+function addDemoMessages() {
+  const messages = [
+    'Quick system status check',
+    'All services are operational',
+    'Memory usage is within normal parameters',
+    'No alerts or warnings detected',
+    'Ready for commands'
+  ];
+  
+  messages.forEach((msg, i) => {
+    setTimeout(() => {
+      app.addMessage(app.activeAgentId, i % 2 === 0 ? 'user' : 'assistant', msg);
+    }, i * 300);
+  });
+}
+
+// Add demo button to test performance
+document.addEventListener('DOMContentLoaded', () => {
+  const demoBtn = document.createElement('button');
+  demoBtn.textContent = 'Add Demo Messages';
+  demoBtn.onclick = addDemoMessages;
+  demoBtn.style.position = 'fixed';
+  demoBtn.style.bottom = '50px';
+  demoBtn.style.right = '10px';
+  demoBtn.style.zIndex = '1001';
+  document.body.appendChild(demoBtn);
+});
+
+  </script>
+</body>
+</html>

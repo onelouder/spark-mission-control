@@ -1,0 +1,441 @@
+/* Agent Queue - Mission Control Design System */
+
+/* ============================================
+   Page Header with Quick Add
+   ============================================ */
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 16px;
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.page-header h2 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.quick-add-form {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.quick-add-input {
+    width: 280px;
+    padding: 6px 10px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-default);
+    border-radius: 2px;
+    color: var(--text-primary);
+    font-size: 12px;
+    font-family: inherit;
+}
+
+.quick-add-input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.quick-add-input::placeholder {
+    color: var(--text-tertiary);
+}
+
+.quick-add-select {
+    padding: 6px 10px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-default);
+    border-radius: 2px;
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-family: inherit;
+}
+
+.quick-add-select:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+/* ============================================
+   Queue Board Layout
+   ============================================ */
+.queue-board {
+    display: flex;
+    gap: 8px;
+    padding: 12px;
+    overflow-x: auto;
+    min-height: calc(100vh - 120px);
+    align-items: flex-start;
+}
+
+.queue-column {
+    background: var(--bg-panel);
+    border: 1px solid var(--border-default);
+    border-radius: 2px;
+    min-width: 260px;
+    width: 280px;
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+}
+
+.queue-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--bg-surface);
+    border-left: 2px solid var(--border-default);
+}
+
+.queue-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+}
+
+.queue-count {
+    font-size: 10px;
+    background: rgba(255, 255, 255, 0.1);
+    padding: 2px 6px;
+    border-radius: 2px;
+    color: var(--text-tertiary);
+}
+
+.queue-content {
+    padding: 6px;
+    flex: 1;
+    overflow-y: auto;
+    min-height: 80px;
+    transition: background 0.15s ease;
+}
+
+/* drag-over styles in Drag and Drop section below */
+
+/* ============================================
+   Queue Item Cards
+   ============================================ */
+.queue-item {
+    background: var(--bg-void);
+    border: 1px solid var(--border-subtle);
+    border-radius: 2px;
+    padding: 8px 10px;
+    margin-bottom: 4px;
+    cursor: grab;
+    transition: all var(--duration-fast);
+}
+
+.queue-item:hover {
+    border-color: var(--border-strong);
+    background: var(--bg-surface);
+}
+
+.queue-item.dragging {
+    opacity: 0.5;
+    cursor: grabbing;
+}
+
+.queue-item-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.queue-item-title {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-primary);
+    line-height: 1.3;
+    cursor: pointer;
+    flex: 1;
+}
+
+.queue-item-title:hover {
+    color: var(--accent);
+}
+
+.queue-item-delete {
+    background: none;
+    border: none;
+    color: var(--text-muted, #666);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 2px;
+    opacity: 0;
+    transition: opacity 0.15s, color 0.15s;
+    flex-shrink: 0;
+}
+
+.queue-item:hover .queue-item-delete {
+    opacity: 1;
+}
+
+.queue-item-delete:hover {
+    color: var(--danger, #ff4444);
+}
+
+.queue-item-checkbox {
+    width: 14px;
+    height: 14px;
+    margin: 1px 0 0 0;
+    cursor: pointer;
+    flex-shrink: 0;
+    accent-color: #35d07f;
+}
+
+.queue-item-title.done {
+    text-decoration: line-through;
+    color: var(--text-tertiary);
+}
+
+.queue-item-archive {
+    background: none;
+    border: none;
+    font-size: 12px;
+    cursor: pointer;
+    padding: 0 2px;
+    opacity: 0;
+    transition: opacity 0.15s;
+    flex-shrink: 0;
+}
+
+.queue-item:hover .queue-item-archive {
+    opacity: 1;
+}
+
+.queue-item-meta {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.queue-badge {
+    font-size: 9px;
+    padding: 2px 5px;
+    border-radius: 2px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.queue-badge.quick {
+    background: rgba(53, 208, 127, 0.15);
+    color: var(--success);
+    border: 1px solid rgba(53, 208, 127, 0.3);
+}
+
+.queue-badge.medium {
+    background: rgba(240, 180, 41, 0.15);
+    color: var(--warning);
+    border: 1px solid rgba(240, 180, 41, 0.3);
+}
+
+.queue-badge.deep {
+    background: rgba(111, 66, 193, 0.15);
+    color: #a78bfa;
+    border: 1px solid rgba(111, 66, 193, 0.3);
+}
+
+.queue-badge.doc {
+    background: rgba(78, 161, 255, 0.15);
+    color: var(--accent);
+    border: 1px solid rgba(78, 161, 255, 0.3);
+    cursor: pointer;
+}
+
+.queue-badge.doc:hover {
+    background: rgba(78, 161, 255, 0.25);
+}
+
+.queue-badge.running {
+    background: rgba(53, 208, 127, 0.2);
+    color: var(--success);
+    border: 1px solid rgba(53, 208, 127, 0.4);
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+/* Priority indicator */
+.queue-item-priority {
+    font-size: 9px;
+    color: var(--text-tertiary);
+    font-family: 'JetBrains Mono', monospace;
+}
+
+/* ============================================
+   Queue Stats in Nav
+   ============================================ */
+.queue-stats {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    padding: 4px 8px;
+    background: var(--bg-surface);
+    border-radius: 2px;
+}
+
+/* ============================================
+   Session Status Box
+   ============================================ */
+.session-status-box {
+    padding: 8px 10px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: 2px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-family: 'JetBrains Mono', monospace;
+}
+
+/* ============================================
+   Toast Notifications
+   ============================================ */
+#toast-container {
+    position: fixed;
+    bottom: 16px;
+    right: 16px;
+    z-index: 400;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.toast {
+    padding: 8px 14px;
+    border-radius: 2px;
+    font-size: 11px;
+    font-weight: 500;
+    animation: slideIn 0.15s ease;
+    max-width: 320px;
+}
+
+.toast.success {
+    background: rgba(53, 208, 127, 0.15);
+    color: var(--success);
+    border: 1px solid rgba(53, 208, 127, 0.3);
+}
+
+.toast.error {
+    background: rgba(255, 92, 92, 0.15);
+    color: var(--danger);
+    border: 1px solid rgba(255, 92, 92, 0.3);
+}
+
+.toast.info {
+    background: rgba(78, 161, 255, 0.15);
+    color: var(--accent);
+    border: 1px solid rgba(78, 161, 255, 0.3);
+}
+
+/* ============================================
+   Drag and Drop
+   ============================================ */
+.queue-content.drag-over {
+    background: rgba(78, 161, 255, 0.1);
+    outline: 2px dashed var(--accent);
+    outline-offset: -4px;
+    border-radius: 4px;
+}
+
+/* ============================================
+   Review Column - Completed Items
+   ============================================ */
+.queue-column[data-column="review"] .queue-item {
+    opacity: 0.7;
+}
+
+.queue-column[data-column="review"] .queue-item-title {
+    color: var(--text-secondary);
+}
+
+/* ============================================
+   Done Column
+   ============================================ */
+.queue-column[data-column="done"] .queue-item {
+    border-left: 2px solid #35d07f;
+}
+
+/* ============================================
+   Archive Column (collapsed by default)
+   ============================================ */
+.archive-column {
+    min-width: 200px;
+    width: 200px;
+}
+
+.archive-column .queue-content.hidden {
+    display: none;
+}
+
+.archive-header {
+    cursor: pointer;
+}
+
+.archive-header:hover {
+    background: var(--bg-panel);
+}
+
+.archive-toggle {
+    font-size: 10px;
+    color: var(--text-tertiary);
+}
+
+.archive-column .queue-item {
+    opacity: 0.5;
+}
+
+.archive-column .queue-item-title {
+    text-decoration: line-through;
+    color: var(--text-tertiary);
+    font-size: 11px;
+}
+
+.archive-all-btn {
+    font-size: 9px !important;
+    padding: 2px 6px !important;
+    background: rgba(53, 208, 127, 0.15);
+    color: var(--success);
+    border: 1px solid rgba(53, 208, 127, 0.3);
+}
+
+.archive-all-btn:hover {
+    background: rgba(53, 208, 127, 0.25);
+}
+
+/* ============================================
+   Responsive
+   ============================================ */
+@media (max-width: 768px) {
+    .quick-add-form {
+        display: none;
+    }
+    
+    .queue-column {
+        min-width: 220px;
+        width: 240px;
+    }
+}
+
+/* Button danger variant */
+.btn-danger {
+    background: rgba(255, 92, 92, 0.15);
+    color: var(--danger);
+    border: 1px solid rgba(255, 92, 92, 0.4);
+}
+
+.btn-danger:hover {
+    background: rgba(255, 92, 92, 0.25);
+    border-color: var(--danger);
+}

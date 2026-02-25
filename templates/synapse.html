@@ -1,0 +1,2866 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon-synapse.svg">
+    <title>Synapse — Agent Fleet Interface</title>
+    <link rel="stylesheet" href="/static/ide-noir.css?v=20260211c">
+    <link rel="stylesheet" href="/static/mission-control.css?v=20260211c">
+    <style>
+        :root {
+            /* IDE Noir palette (matches Briefing/Kanban) */
+            --bg: #0b0f14;
+            --surface: #0f1620;
+            --elevated: #131c28;
+            --border: rgba(255,255,255, 0.10);
+            --border-subtle: rgba(255,255,255, 0.06);
+            --text: rgba(255,255,255, 0.90);
+            --text-secondary: rgba(255,255,255, 0.65);
+            --user-bg: #1a2433;
+            --accent: #4ea1ff;
+            --status-idle: #6A6A6A;
+            --status-working: #35d07f;
+            --status-waiting: #f0b429;
+            --status-error: #ff5c5c;
+            --status-blocked: #ff5c5c;
+            /* Organization colors */
+            --org-internal: #6366f1;
+            --org-novvi: #10b981;
+            --org-xcognis: #f59e0b;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: "Ubuntu Mono", "DejaVu Sans Mono", "Cascadia Code", monospace;
+            font-size: 14px;
+            line-height: 1.55;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0.5rem 1rem;
+        }
+
+        /* Connection status (in top nav) */
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+
+        .connection-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--status-idle);
+        }
+
+        .connection-dot.connected {
+            background: var(--status-working);
+        }
+
+        /* Synapse sub-nav - view switcher tabs */
+        .synapse-subnav {
+            display: flex;
+            gap: 0;
+            margin-bottom: 0.5rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .synapse-subnav button {
+            background: transparent;
+            border: none;
+            border-bottom: 2px solid transparent;
+            color: var(--text-secondary);
+            padding: 0.35rem 0.75rem;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.85rem;
+        }
+
+        .synapse-subnav button.active {
+            color: var(--text);
+            border-bottom-color: var(--accent);
+        }
+
+        .synapse-subnav button:hover:not(.active) {
+            color: var(--text);
+        }
+
+        /* Fleet Grid - tighter */
+        .fleet-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 0.5rem;
+        }
+
+        .agent-card {
+            background: var(--surface);
+            border: 1px solid var(--border-subtle);
+            padding: 0.5rem 0.75rem;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }
+
+        .agent-card:hover {
+            border-color: var(--accent);
+        }
+
+        .agent-card.focused {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 1px var(--accent);
+        }
+
+        .agent-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.25rem;
+        }
+
+        .agent-name {
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+        }
+
+        .agent-emoji {
+            font-size: 1rem;
+        }
+
+        .agent-id {
+            font-weight: bold;
+            text-transform: uppercase;
+            color: var(--text);
+            font-size: 0.9rem;
+        }
+
+        .agent-state {
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+            font-size: 0.8rem;
+        }
+
+        .state-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+        }
+
+        .state-dot.idle { background: var(--status-idle); }
+        .state-dot.working { 
+            background: var(--status-working);
+            animation: pulse 1.5s infinite;
+        }
+        .state-dot.blocked { background: var(--status-blocked); }
+        .state-dot.error { background: var(--status-error); }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Organization badges */
+        .org-badge {
+            font-size: 0.65rem;
+            padding: 0.1rem 0.35rem;
+            border-radius: 3px;
+            text-transform: uppercase;
+            font-weight: 500;
+            letter-spacing: 0.03em;
+        }
+
+        .org-indicator {
+            width: 3px;
+            height: 100%;
+            position: absolute;
+            left: 0;
+            top: 0;
+            border-radius: 2px 0 0 2px;
+        }
+
+        .agent-card {
+            position: relative;
+        }
+
+        .agent-task {
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+            margin-bottom: 0.35rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .agent-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            position: relative;
+        }
+
+        .model-select {
+            cursor: pointer;
+            padding: 0.1rem 0.35rem;
+            border-radius: 3px;
+            transition: background 0.15s;
+        }
+        .model-select:hover {
+            background: rgba(255,255,255,0.1);
+            color: var(--accent);
+        }
+        .model-dropdown {
+            position: absolute;
+            bottom: 100%;
+            left: 0;
+            background: var(--elevated);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            z-index: 50;
+            min-width: 120px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+        }
+        .model-option {
+            padding: 0.35rem 0.75rem;
+            cursor: pointer;
+            font-size: 0.8rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .model-option:hover {
+            background: rgba(78, 161, 255, 0.15);
+        }
+        .model-option.active {
+            color: var(--accent);
+        }
+
+        .context-bar {
+            width: 50px;
+            height: 3px;
+            background: rgba(255,255,255,0.15);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .context-fill {
+            height: 100%;
+            background: var(--accent);
+            transition: width 0.3s;
+        }
+
+        .context-fill.high {
+            background: var(--status-error);
+        }
+
+        .token-count {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .token-count.high {
+            color: var(--status-error);
+        }
+
+        /* Chat View - compact */
+        .chat-view {
+            display: none;
+            flex-direction: column;
+            height: calc(100vh - 120px); /* nav-bar(40) + subnav(30) + padding(16) + buffer */
+            overflow: hidden;
+        }
+
+        .chat-view.active {
+            display: flex;
+        }
+
+        .chat-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.35rem 0;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 0.5rem;
+        }
+
+        .chat-agent-info {
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+            font-size: 0.9rem;
+        }
+
+        .chat-context {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+
+        /* Thinking toggle */
+        .thinking-toggle {
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+            padding: 0.15rem 0.4rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            transition: all 0.15s ease;
+        }
+        .thinking-toggle:hover {
+            border-color: var(--accent);
+            color: var(--text);
+        }
+        .thinking-toggle.active {
+            background: rgba(78, 161, 255, 0.15);
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+        .thinking-toggle .toggle-icon {
+            font-size: 0.85rem;
+        }
+
+        .chat-messages {
+            flex: 1;
+            min-height: 0; /* Critical: allows flex item to shrink below content height */
+            overflow-y: auto;
+            padding: 0;
+        }
+
+        /* Terminal-density message styling */
+        .message {
+            margin: 0;
+            padding: 0;
+            line-height: 1.5;
+        }
+
+        .message.user .message-content {
+            color: #C4A35A; /* warm gold for user */
+        }
+
+        .message.assistant .message-content {
+            color: var(--text);
+        }
+
+        .message-content {
+            display: block;
+        }
+
+        .message-ts {
+            color: var(--text-secondary);
+            font-size: 0.85em;
+            margin-right: 0.5em;
+        }
+
+        .message-role {
+            color: var(--accent);
+            margin-right: 0.5em;
+        }
+
+        .message-text {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            display: inline;
+        }
+
+        .chat-input-container {
+            padding: 0.35rem 0;
+            border-top: 1px solid var(--border);
+        }
+
+        .chat-input {
+            width: 100%;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 0.5rem 0.75rem;
+            font-family: inherit;
+            font-size: inherit;
+            resize: none;
+        }
+
+        .chat-input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        /* Fleet view shown by default */
+        .fleet-view {
+            display: block;
+        }
+
+        .fleet-view.hidden {
+            display: none;
+        }
+
+        /* Loading state */
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+        
+        /* Spinner */
+        .spinner {
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255,255,255,0.15);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        /* Toast notifications */
+        .toast-container {
+            position: fixed;
+            bottom: 1rem;
+            right: 1rem;
+            z-index: 2000;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .toast {
+            background: var(--elevated);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 0.5rem 0.75rem;
+            font-size: 0.85rem;
+            opacity: 0;
+            transform: translateX(100%);
+            transition: all 0.3s ease;
+        }
+        .toast.visible {
+            opacity: 1;
+            transform: translateX(0);
+        }
+        .toast-success { border-left: 3px solid var(--status-working); }
+        .toast-warning { border-left: 3px solid var(--status-waiting); }
+        .toast-error { border-left: 3px solid var(--status-error); }
+        .toast-info { border-left: 3px solid var(--accent); }
+        
+        /* Loading overlay for chat */
+        .chat-loading-overlay {
+            display: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(11, 15, 20, 0.85);
+            z-index: 100;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        .chat-loading-overlay.visible {
+            display: flex;
+        }
+        .chat-loading-overlay .spinner {
+            width: 24px;
+            height: 24px;
+        }
+        .chat-loading-text {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+        
+        /* Connection quality indicator */
+        .conn-quality {
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+        .conn-quality-bars {
+            display: flex;
+            gap: 2px;
+            align-items: flex-end;
+        }
+        .conn-quality-bar {
+            width: 3px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 1px;
+        }
+        .conn-quality-bar.active { background: var(--status-working); }
+        .conn-quality-bar.warning { background: var(--status-waiting); }
+        .conn-quality-bar.error { background: var(--status-error); }
+        .conn-quality-bar:nth-child(1) { height: 4px; }
+        .conn-quality-bar:nth-child(2) { height: 6px; }
+        .conn-quality-bar:nth-child(3) { height: 8px; }
+        .conn-quality-bar:nth-child(4) { height: 10px; }
+        .conn-latency {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            min-width: 40px;
+        }
+        
+        /* Typing indicator */
+        .typing-indicator {
+            display: none;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.25rem 0.5rem;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+        .typing-indicator.visible {
+            display: flex;
+        }
+        .typing-dots {
+            display: flex;
+            gap: 3px;
+        }
+        .typing-dots span {
+            width: 4px;
+            height: 4px;
+            background: var(--text-secondary);
+            border-radius: 50%;
+            animation: typing-bounce 1.4s infinite ease-in-out;
+        }
+        .typing-dots span:nth-child(1) { animation-delay: 0s; }
+        .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+        .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes typing-bounce {
+            0%, 80%, 100% { opacity: 0.3; transform: scale(1); }
+            40% { opacity: 1; transform: scale(1.2); }
+        }
+
+        /* Multi-Chat View */
+        .multi-view {
+            display: none;
+            height: calc(100vh - 120px); /* nav-bar(40) + subnav(30) + padding(16) + buffer */
+        }
+        .multi-view.active {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            grid-template-rows: repeat(2, 1fr);
+            gap: 0.5rem;
+        }
+        .chat-pane {
+            display: flex;
+            flex-direction: column;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .chat-pane.empty {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-secondary);
+            cursor: pointer;
+        }
+        .chat-pane.empty:hover {
+            border-color: var(--accent);
+        }
+        .pane-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.35rem 0.5rem;
+            background: var(--elevated);
+            border-bottom: 1px solid var(--border);
+            font-size: 0.8rem;
+        }
+        .pane-header-left {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+        .pane-agent-name {
+            font-weight: 500;
+        }
+        .pane-model-select {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 0.1rem 0.4rem;
+            border-radius: 3px;
+            background: rgba(255,255,255,0.05);
+            margin-left: 0.5rem;
+            position: relative;
+        }
+        .pane-model-select:hover {
+            background: rgba(255,255,255,0.1);
+            color: var(--accent);
+        }
+        .pane-model-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            background: var(--elevated);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            z-index: 100;
+            min-width: 140px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            margin-top: 0.25rem;
+        }
+        .pane-model-option {
+            padding: 0.4rem 0.75rem;
+            cursor: pointer;
+            font-size: 0.8rem;
+        }
+        .pane-model-option:hover {
+            background: rgba(78, 161, 255, 0.15);
+        }
+        .pane-model-option.active {
+            color: var(--accent);
+            background: rgba(78, 161, 255, 0.1);
+        }
+        .pane-state-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--status-idle);
+        }
+        .pane-state-dot.working {
+            background: var(--status-working);
+            animation: pulse 1.5s infinite;
+        }
+        .pane-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 1rem;
+            line-height: 1;
+            padding: 0 0.25rem;
+        }
+        .pane-close:hover {
+            color: var(--status-error);
+        }
+        .pane-header-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+        .pane-new-chat {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 0.9rem;
+            line-height: 1;
+            padding: 0 0.25rem;
+            opacity: 0.7;
+        }
+        .pane-new-chat:hover {
+            color: var(--accent);
+            opacity: 1;
+        }
+        .pane-thinking-toggle {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 0.8rem;
+            line-height: 1;
+            padding: 0.15rem 0.4rem;
+            opacity: 0.8;
+            transition: all 0.15s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.2rem;
+        }
+        .pane-thinking-toggle:hover {
+            opacity: 1;
+            border-color: var(--accent);
+            color: var(--text);
+        }
+        .pane-thinking-toggle.active {
+            opacity: 1;
+            background: rgba(78, 161, 255, 0.2);
+            border-color: var(--accent);
+            color: var(--accent);
+            box-shadow: 0 0 4px rgba(78, 161, 255, 0.3);
+        }
+        .pane-thinking-toggle .think-label {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.02em;
+        }
+        .pane-messages {
+            flex: 1;
+            min-height: 0; /* Critical: allows flex item to shrink below content height */
+            overflow-y: auto;
+            padding: 0.5rem;
+            font-size: 0.85rem;
+        }
+        .pane-messages .message {
+            margin-bottom: 0.35rem;
+        }
+        .pane-input-container {
+            padding: 0.35rem;
+            border-top: 1px solid var(--border);
+        }
+        .pane-input {
+            width: 100%;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            color: var(--text);
+            padding: 0.35rem 0.5rem;
+            font-family: inherit;
+            font-size: 0.85rem;
+            resize: none;
+        }
+        .pane-input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+        .pane-typing {
+            display: none;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.2rem 0.5rem;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+        .pane-typing.visible {
+            display: flex;
+        }
+        .pane-stop-btn {
+            margin-left: auto;
+            padding: 0.15rem 0.5rem;
+            font-size: 0.7rem;
+            background: var(--danger, #ff5c5c);
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            opacity: 0.9;
+        }
+        .pane-stop-btn:hover {
+            opacity: 1;
+            background: #ff3333;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Command Bar (Sprint 3) */
+        .command-bar-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.6);
+            z-index: 1000;
+            justify-content: center;
+            padding-top: 15vh;
+        }
+
+        .command-bar-overlay.active {
+            display: flex;
+        }
+
+        .command-bar {
+            width: 100%;
+            max-width: 560px;
+            background: var(--elevated);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            overflow: hidden;
+            max-height: 70vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .command-input-wrapper {
+            display: flex;
+            align-items: center;
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .command-input-prefix {
+            color: var(--accent);
+            margin-right: 0.5rem;
+            font-weight: bold;
+        }
+
+        .command-input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: var(--text);
+            font-family: inherit;
+            font-size: 1rem;
+            outline: none;
+        }
+
+        .command-hint {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            padding: 0 0.5rem;
+        }
+
+        .command-results {
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .command-section {
+            padding: 0.5rem 0;
+        }
+
+        .command-section-title {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            padding: 0.25rem 1rem;
+            letter-spacing: 0.05em;
+        }
+
+        .command-item {
+            display: flex;
+            align-items: center;
+            padding: 0.6rem 1rem;
+            cursor: pointer;
+            gap: 0.75rem;
+        }
+
+        .command-item:hover,
+        .command-item.selected {
+            background: rgba(78, 161, 255, 0.15);
+        }
+
+        .command-item-icon {
+            font-size: 1.1rem;
+            width: 24px;
+            text-align: center;
+        }
+
+        .command-item-text {
+            flex: 1;
+        }
+
+        .command-item-name {
+            color: var(--text);
+        }
+
+        .command-item-desc {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+
+        .command-item-shortcut {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            padding: 0.2rem 0.4rem;
+            background: var(--surface);
+            border-radius: 3px;
+        }
+
+        .command-footer {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.5rem 1rem;
+            border-top: 1px solid var(--border-subtle);
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .command-footer kbd {
+            background: var(--surface);
+            padding: 0.15rem 0.4rem;
+            border-radius: 3px;
+            margin: 0 0.15rem;
+        }
+
+        /* Configure Modal */
+        .configure-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.6);
+            z-index: 1100;
+            justify-content: center;
+            align-items: center;
+        }
+        .configure-overlay.active {
+            display: flex;
+        }
+        .configure-modal {
+            width: 100%;
+            max-width: 800px;
+            max-height: 85vh;
+            background: var(--elevated);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .configure-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+        .configure-header-info {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 1rem;
+        }
+        .configure-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 1.2rem;
+            cursor: pointer;
+            padding: 0.25rem 0.5rem;
+        }
+        .configure-close:hover {
+            color: var(--status-error);
+        }
+        .configure-tabs {
+            display: flex;
+            gap: 0;
+            border-bottom: 1px solid var(--border);
+        }
+        .configure-tabs button {
+            background: transparent;
+            border: none;
+            border-bottom: 2px solid transparent;
+            color: var(--text-secondary);
+            padding: 0.5rem 1rem;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.85rem;
+        }
+        .configure-tabs button.active {
+            color: var(--text);
+            border-bottom-color: var(--accent);
+        }
+        .configure-tabs button:hover:not(.active) {
+            color: var(--text);
+        }
+        .configure-editor {
+            flex: 1;
+            width: 100%;
+            min-height: 300px;
+            background: var(--bg);
+            border: none;
+            color: var(--text);
+            padding: 0.75rem 1rem;
+            font-family: inherit;
+            font-size: 0.9rem;
+            line-height: 1.55;
+            resize: vertical;
+            overflow-y: auto;
+        }
+        .configure-editor:focus {
+            outline: none;
+        }
+        .configure-editor.readonly {
+            background: var(--surface);
+            color: var(--text-secondary);
+            cursor: default;
+        }
+        .configure-footer {
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            border-top: 1px solid var(--border);
+        }
+        .configure-status {
+            flex: 1;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+        .configure-footer button {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 0.35rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.85rem;
+        }
+        .configure-footer button:hover {
+            border-color: var(--accent);
+        }
+        .configure-footer button.save-btn {
+            background: rgba(78, 161, 255, 0.15);
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+        .configure-footer button.save-btn:hover {
+            background: rgba(78, 161, 255, 0.25);
+        }
+        /* Configure gear button on agent cards */
+        .agent-configure-btn {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 0.9rem;
+            padding: 0.1rem 0.3rem;
+            border-radius: 3px;
+            opacity: 0;
+            transition: opacity 0.15s;
+        }
+        .agent-card:hover .agent-configure-btn {
+            opacity: 1;
+        }
+        .agent-configure-btn:hover {
+            color: var(--accent);
+            background: rgba(78, 161, 255, 0.1);
+        }
+    </style>
+</head>
+<body>
+    <!-- Row 1: Standard Mission Control nav -->
+    <nav class="nav-bar">
+        <div class="nav-container">
+            <div class="nav-left">
+                <span class="nav-title">Mission Control</span>
+                <div class="nav-tabs">
+                    <a href="/" class="nav-tab">Kanban</a>
+                    <a href="/briefing" class="nav-tab">Briefing</a>
+                    <a href="/email" class="nav-tab">Email</a>
+                    <a href="/queue" class="nav-tab">Queue</a>
+                    <a href="/crm" class="nav-tab">CRM</a>
+                    <a href="/synapse" class="nav-tab active">Synapse</a>
+                    <a href="/activity" class="nav-tab">Activity</a>
+                    <a href="/rbot" class="nav-tab">Research</a>
+                    <a href="/atlas" class="nav-tab">Atlas</a>
+                    <a href="https://jarvis.jwells.net/activity" class="nav-tab" target="_blank">Jarvis</a>
+                </div>
+            </div>
+            <div class="nav-right">
+                <div class="connection-status">
+                    <div class="connection-dot" id="connDot"></div>
+                    <span id="connStatus">Connecting...</span>
+                </div>
+                <div class="conn-quality" id="connQuality" style="display:none;">
+                    <div class="conn-quality-bars">
+                        <div class="conn-quality-bar" id="qBar1"></div>
+                        <div class="conn-quality-bar" id="qBar2"></div>
+                        <div class="conn-quality-bar" id="qBar3"></div>
+                        <div class="conn-quality-bar" id="qBar4"></div>
+                    </div>
+                    <span class="conn-latency" id="connLatency"></span>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <!-- Row 2: Synapse view switcher -->
+        <div class="synapse-subnav">
+            <button class="active" data-view="fleet">FLEET</button>
+            <button data-view="chat">CHAT</button>
+            <button data-view="multi">MULTI</button>
+            <button data-view="telemetry" disabled>TELEMETRY</button>
+            <button data-view="pipeline" disabled>PIPELINE</button>
+        </div>
+
+        <!-- Fleet View -->
+        <div class="fleet-view" id="fleetView">
+            <div class="fleet-grid" id="fleetGrid">
+                <div class="loading">Loading agents...</div>
+            </div>
+        </div>
+
+        <!-- Command Bar (Sprint 3) -->
+        <div class="command-bar-overlay" id="commandOverlay" onclick="closeCommandBar(event)">
+            <div class="command-bar" onclick="event.stopPropagation()">
+                <div class="command-input-wrapper">
+                    <span class="command-input-prefix">></span>
+                    <input type="text" class="command-input" id="commandInput" 
+                           placeholder="Type command or agent name..."
+                           autocomplete="off"
+                           onkeydown="handleCommandKey(event)"
+                           oninput="filterCommands()">
+                    <span class="command-hint">Esc to close</span>
+                </div>
+                <div class="command-results" id="commandResults"></div>
+                <div class="command-footer">
+                    <span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
+                    <span><kbd>Enter</kbd> select</span>
+                    <span><kbd>Esc</kbd> close</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Configure Modal -->
+        <div class="configure-overlay" id="configureOverlay" onclick="closeConfigureModal(event)">
+            <div class="configure-modal" onclick="event.stopPropagation()">
+                <div class="configure-header">
+                    <div class="configure-header-info">
+                        <span id="configAgentEmoji"></span>
+                        <span id="configAgentName" style="font-weight:bold;"></span>
+                        <span style="color:var(--text-secondary);font-size:0.85rem;">— Workspace Files</span>
+                    </div>
+                    <button class="configure-close" onclick="closeConfigureModal()">&times;</button>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:0.25rem 1rem;border-bottom:1px solid var(--border-subtle);font-size:0.75rem;color:var(--text-secondary);">
+                    <span id="configWorkspacePath"></span>
+                    <span id="configEditHint"></span>
+                </div>
+                <div class="configure-tabs" id="configureTabs">
+                    <button class="active" data-tab="soulMd" onclick="switchConfigTab('soulMd')">SOUL.md</button>
+                    <button data-tab="agentsMd" onclick="switchConfigTab('agentsMd')">AGENTS.md</button>
+                    <button data-tab="workingMd" onclick="switchConfigTab('workingMd')">WORKING.md</button>
+                </div>
+                <textarea class="configure-editor" id="configureEditor"
+                    placeholder=""></textarea>
+                <div class="configure-footer">
+                    <span class="configure-status" id="configureStatus"></span>
+                    <button onclick="closeConfigureModal()">Cancel</button>
+                    <button class="save-btn" id="configSaveBtn" onclick="saveAgentConfig()">Save</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast Container -->
+        <div id="toastContainer" class="toast-container"></div>
+
+        <!-- Chat View -->
+        <div class="chat-view" id="chatView" style="position:relative;">
+            <!-- Loading overlay for history fetch -->
+            <div class="chat-loading-overlay" id="chatLoadingOverlay">
+                <span class="spinner"></span>
+                <span class="chat-loading-text" id="chatLoadingText">Loading history...</span>
+            </div>
+            <div class="chat-header">
+                <div class="chat-agent-info">
+                    <span class="agent-emoji" id="chatAgentEmoji">🤖</span>
+                    <span class="agent-id" id="chatAgentName">Select Agent</span>
+                    <span class="chat-context">
+                        <span class="token-count" id="chatTokenCount">0/200k</span>
+                        <span class="state-dot idle" id="chatStateDot"></span>
+                        <button class="thinking-toggle" id="thinkingToggle" onclick="toggleThinking()" title="Extended thinking mode">
+                            <span class="toggle-icon">🧠</span>
+                            <span id="thinkingLabel">Off</span>
+                        </button>
+                    </span>
+                </div>
+                <button onclick="switchToFleet()" style="background:transparent;border:none;color:var(--text-secondary);cursor:pointer;font-family:inherit;">← Fleet</button>
+            </div>
+            <div class="chat-messages" id="chatMessages"></div>
+            <div class="typing-indicator" id="typingIndicator">
+                <span class="typing-dots"><span></span><span></span><span></span></span>
+                <span class="typing-text">Agent is thinking...</span>
+            </div>
+            <div class="chat-input-container">
+                <textarea class="chat-input" id="chatInput" rows="2" 
+                    placeholder="Type message... (Enter to send)"
+                    onkeydown="handleInputKey(event)"></textarea>
+            </div>
+        </div>
+
+        <!-- Multi-Chat View -->
+        <div class="multi-view" id="multiView">
+            <div class="chat-pane" id="pane0" data-agent="">
+                <div class="pane-header">
+                    <div class="pane-header-left">
+                        <span class="pane-state-dot" id="pane0Dot"></span>
+                        <span class="pane-agent-name" id="pane0Name">Click to select agent</span>
+                        <span class="pane-model-select" id="pane0Model" onclick="event.stopPropagation(); togglePaneModelSelect(0, this)"></span>
+                    </div>
+                    <div class="pane-header-actions">
+                        <button class="pane-thinking-toggle" id="pane0Think" onclick="togglePaneThinking(0)" title="Extended Thinking">🧠<span class="think-label" id="pane0ThinkLabel">Off</span></button>
+                        <button class="pane-new-chat" onclick="resetPane(0)" title="New Chat">⟳</button>
+                        <button class="pane-close" onclick="clearPane(0)">×</button>
+                    </div>
+                </div>
+                <div class="pane-messages" id="pane0Messages"></div>
+                <div class="pane-typing" id="pane0Typing">
+                    <span class="typing-dots"><span></span><span></span><span></span></span>
+                    <span>Thinking...</span>
+                    <button class="pane-stop-btn" onclick="abortPane(0)" title="Stop generation">■ Stop</button>
+                </div>
+                <div class="pane-input-container">
+                    <textarea class="pane-input" id="pane0Input" rows="1" 
+                        placeholder="Message..." onkeydown="handlePaneInputKey(event, 0)"></textarea>
+                </div>
+            </div>
+            <div class="chat-pane" id="pane1" data-agent="">
+                <div class="pane-header">
+                    <div class="pane-header-left">
+                        <span class="pane-state-dot" id="pane1Dot"></span>
+                        <span class="pane-agent-name" id="pane1Name">Click to select agent</span>
+                        <span class="pane-model-select" id="pane1Model" onclick="event.stopPropagation(); togglePaneModelSelect(1, this)"></span>
+                    </div>
+                    <div class="pane-header-actions">
+                        <button class="pane-thinking-toggle" id="pane1Think" onclick="togglePaneThinking(1)" title="Extended Thinking">🧠<span class="think-label" id="pane1ThinkLabel">Off</span></button>
+                        <button class="pane-new-chat" onclick="resetPane(1)" title="New Chat">⟳</button>
+                        <button class="pane-close" onclick="clearPane(1)">×</button>
+                    </div>
+                </div>
+                <div class="pane-messages" id="pane1Messages"></div>
+                <div class="pane-typing" id="pane1Typing">
+                    <span class="typing-dots"><span></span><span></span><span></span></span>
+                    <span>Thinking...</span>
+                    <button class="pane-stop-btn" onclick="abortPane(1)" title="Stop generation">■ Stop</button>
+                </div>
+                <div class="pane-input-container">
+                    <textarea class="pane-input" id="pane1Input" rows="1" 
+                        placeholder="Message..." onkeydown="handlePaneInputKey(event, 1)"></textarea>
+                </div>
+            </div>
+            <div class="chat-pane" id="pane2" data-agent="">
+                <div class="pane-header">
+                    <div class="pane-header-left">
+                        <span class="pane-state-dot" id="pane2Dot"></span>
+                        <span class="pane-agent-name" id="pane2Name">Click to select agent</span>
+                        <span class="pane-model-select" id="pane2Model" onclick="event.stopPropagation(); togglePaneModelSelect(2, this)"></span>
+                    </div>
+                    <div class="pane-header-actions">
+                        <button class="pane-thinking-toggle" id="pane2Think" onclick="togglePaneThinking(2)" title="Extended Thinking">🧠<span class="think-label" id="pane2ThinkLabel">Off</span></button>
+                        <button class="pane-new-chat" onclick="resetPane(2)" title="New Chat">⟳</button>
+                        <button class="pane-close" onclick="clearPane(2)">×</button>
+                    </div>
+                </div>
+                <div class="pane-messages" id="pane2Messages"></div>
+                <div class="pane-typing" id="pane2Typing">
+                    <span class="typing-dots"><span></span><span></span><span></span></span>
+                    <span>Thinking...</span>
+                    <button class="pane-stop-btn" onclick="abortPane(2)" title="Stop generation">■ Stop</button>
+                </div>
+                <div class="pane-input-container">
+                    <textarea class="pane-input" id="pane2Input" rows="1" 
+                        placeholder="Message..." onkeydown="handlePaneInputKey(event, 2)"></textarea>
+                </div>
+            </div>
+            <div class="chat-pane" id="pane3" data-agent="">
+                <div class="pane-header">
+                    <div class="pane-header-left">
+                        <span class="pane-state-dot" id="pane3Dot"></span>
+                        <span class="pane-agent-name" id="pane3Name">Click to select agent</span>
+                        <span class="pane-model-select" id="pane3Model" onclick="event.stopPropagation(); togglePaneModelSelect(3, this)"></span>
+                    </div>
+                    <div class="pane-header-actions">
+                        <button class="pane-thinking-toggle" id="pane3Think" onclick="togglePaneThinking(3)" title="Extended Thinking">🧠<span class="think-label" id="pane3ThinkLabel">Off</span></button>
+                        <button class="pane-new-chat" onclick="resetPane(3)" title="New Chat">⟳</button>
+                        <button class="pane-close" onclick="clearPane(3)">×</button>
+                    </div>
+                </div>
+                <div class="pane-messages" id="pane3Messages"></div>
+                <div class="pane-typing" id="pane3Typing">
+                    <span class="typing-dots"><span></span><span></span><span></span></span>
+                    <span>Thinking...</span>
+                    <button class="pane-stop-btn" onclick="abortPane(3)" title="Stop generation">■ Stop</button>
+                </div>
+                <div class="pane-input-container">
+                    <textarea class="pane-input" id="pane3Input" rows="1" 
+                        placeholder="Message..." onkeydown="handlePaneInputKey(event, 3)"></textarea>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // State
+        let ws = null;
+        let agents = {};
+        let focusedAgent = null;
+        let agentThinking = {};  // Track thinking mode per agent: agentId -> boolean
+        let messageHistory = {};
+        let reconnectAttempts = 0;
+        let agentTyping = {}; // Track typing state per agent
+        
+        // Scroll optimization state
+        let lastRenderedCount = {};  // agentId -> number of messages last rendered
+        let scrollPositions = {};    // agentId -> { scrollTop, isAtBottom }
+        
+        // Check if container is scrolled to bottom (within threshold)
+        function isAtBottom(container, threshold = 50) {
+            return container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+        }
+        
+        // Save scroll state before switching agents or updating
+        function saveScrollState(agentId) {
+            const container = document.getElementById('chatMessages');
+            if (container && agentId) {
+                scrollPositions[agentId] = {
+                    scrollTop: container.scrollTop,
+                    isAtBottom: isAtBottom(container)
+                };
+            }
+        }
+
+        // WebSocket connection
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${window.location.host}/api/synapse/ws`);
+            
+            ws.onopen = () => {
+                document.getElementById('connDot').classList.add('connected');
+                document.getElementById('connStatus').textContent = 'Connected';
+                if (reconnectAttempts > 0) {
+                    showToast('Reconnected!', 'success');
+                }
+                reconnectAttempts = 0;
+                startPingMonitor();
+                
+                // Resubscribe to pane agents after reconnect
+                for (let i = 0; i < 4; i++) {
+                    if (paneAgents[i]) {
+                        ws.send(JSON.stringify({ type: 'subscribe', agentId: paneAgents[i] }));
+                    }
+                }
+            };
+            
+            ws.onclose = () => {
+                document.getElementById('connDot').classList.remove('connected');
+                document.getElementById('connStatus').textContent = 'Reconnecting...';
+                stopPingMonitor();
+                showToast('Connection lost. Reconnecting...', 'warning');
+                // Reconnect with exponential backoff
+                const delay = Math.min(2000 * Math.pow(1.5, reconnectAttempts), 30000);
+                reconnectAttempts++;
+                setTimeout(connect, delay);
+            };
+            
+            ws.onmessage = (event) => {
+                const frame = JSON.parse(event.data);
+                handleFrame(frame);
+            };
+            
+            ws.onerror = (err) => {
+                console.error('WebSocket error:', err);
+            };
+        }
+
+        function handleFrame(frame) {
+            console.log('Frame:', frame);
+            
+            switch (frame.type) {
+                case 'connected':
+                case 'status_all':
+                    // Initial or update - contains all agents
+                    if (frame.payload && frame.payload.agents) {
+                        frame.payload.agents.forEach(agent => {
+                            agents[agent.agentId] = agent;
+                            // Update pane states
+                            updatePaneState(agent.agentId, agent.state);
+                        });
+                        renderFleet();
+                        // Only initialize panes ONCE when agents first load, not on every status update
+                        if (document.getElementById('multiView').classList.contains('active') && !window._panesInitialized) {
+                            loadModelOptions().then(() => initializeMultiPanes());
+                            window._panesInitialized = true;
+                        }
+                    }
+                    break;
+                    
+                case 'status':
+                    // Single agent status update
+                    if (frame.payload) {
+                        agents[frame.agentId] = frame.payload;
+                        renderFleet();
+                        // Update chat header if this is the focused agent
+                        if (focusedAgent === frame.agentId) {
+                            updateChatContext(frame.payload);
+                        }
+                        // Update pane states
+                        updatePaneState(frame.agentId, frame.payload.state);
+                    }
+                    break;
+                    
+                case 'subscribed':
+                    // Subscribed to agent - may include history
+                    if (frame.payload && frame.payload.history) {
+                        messageHistory[frame.agentId] = frame.payload.history;
+                        // Reset render counts for this agent
+                        lastRenderedCount[frame.agentId] = 0;
+                        for (let i = 0; i < 4; i++) {
+                            if (paneAgents[i] === frame.agentId) {
+                                lastRenderedCount[`pane${i}:${frame.agentId}`] = 0;
+                            }
+                        }
+                        renderChat();
+                    }
+                    break;
+                    
+                case 'chunk':
+                    // Streaming chunk from agent - REPLACE (cumulative) text, not append
+                    if (frame.agentId && frame.payload && frame.payload.text) {
+                        updatePaneState(frame.agentId, 'working');
+                        if (!messageHistory[frame.agentId]) {
+                            messageHistory[frame.agentId] = [];
+                        }
+                        const history = messageHistory[frame.agentId];
+                        const lastMsg = history[history.length - 1];
+                        
+                        // Replace text in last streaming message, or create new one
+                        if (lastMsg && lastMsg.role === 'assistant' && lastMsg._streaming) {
+                            lastMsg.text = frame.payload.text;  // Replace, not append
+                        } else {
+                            history.push({
+                                role: 'assistant',
+                                text: frame.payload.text,
+                                ts: new Date().toISOString(),
+                                _streaming: true
+                            });
+                        }
+                        if (focusedAgent === frame.agentId) {
+                            renderChat(true);  // streamingUpdate=true
+                        }
+                        // Update multi-pane view (streaming mode - no full re-render)
+                        for (let i = 0; i < 4; i++) {
+                            if (paneAgents[i] === frame.agentId) {
+                                renderPaneMessages(i, true);  // streamingUpdate=true
+                            }
+                        }
+                    }
+                    break;
+                    
+                case 'message':
+                    // Complete message from agent (marks streaming done)
+                    if (frame.agentId && frame.payload) {
+                        setAgentTyping(frame.agentId, false);
+                        updatePaneState(frame.agentId, 'idle');
+                        if (!messageHistory[frame.agentId]) {
+                            messageHistory[frame.agentId] = [];
+                        }
+                        const history = messageHistory[frame.agentId];
+                        const lastMsg = history[history.length - 1];
+                        
+                        // If we were streaming, mark complete. Otherwise add new message.
+                        if (lastMsg && lastMsg._streaming) {
+                            lastMsg._streaming = false;
+                            // Use the complete text if provided
+                            if (frame.payload.text) {
+                                lastMsg.text = frame.payload.text;
+                            }
+                        } else {
+                            history.push({
+                                role: frame.payload.role || 'assistant',
+                                text: frame.payload.text || '',
+                                ts: frame.payload.ts || new Date().toISOString()
+                            });
+                        }
+                        if (focusedAgent === frame.agentId) {
+                            renderChat();
+                        }
+                        // Update multi-pane view
+                        for (let i = 0; i < 4; i++) {
+                            if (paneAgents[i] === frame.agentId) {
+                                renderPaneMessages(i);
+                            }
+                        }
+                    }
+                    break;
+                    
+                case 'history':
+                    // History response
+                    setChatLoading(false);
+                    if (frame.agentId && frame.payload && frame.payload.messages) {
+                        messageHistory[frame.agentId] = frame.payload.messages;
+                        // Reset render counts for this agent
+                        lastRenderedCount[frame.agentId] = 0;
+                        for (let i = 0; i < 4; i++) {
+                            if (paneAgents[i] === frame.agentId) {
+                                lastRenderedCount[`pane${i}:${frame.agentId}`] = 0;
+                            }
+                        }
+                        if (focusedAgent === frame.agentId) {
+                            renderChat();
+                        }
+                        // Update multi-pane view
+                        for (let i = 0; i < 4; i++) {
+                            if (paneAgents[i] === frame.agentId) {
+                                renderPaneMessages(i);
+                            }
+                        }
+                        showToast(`Loaded ${frame.payload.messages.length} messages`, 'success');
+                    }
+                    break;
+                    
+                case 'pong':
+                    handlePong();
+                    break;
+                    
+                case 'ack':
+                    // Message acknowledged - agent is now processing
+                    if (frame.agentId) {
+                        setAgentTyping(frame.agentId, true);
+                    }
+                    break;
+                    
+                case 'error':
+                    console.error('Error:', frame.payload);
+                    if (frame.agentId) {
+                        setAgentTyping(frame.agentId, false);
+                    }
+                    const errMsg = frame.payload?.message || frame.payload?.error || 'Unknown error';
+                    showToast(`Error: ${errMsg}`, 'error');
+                    break;
+            }
+        }
+
+        function renderFleet() {
+            const grid = document.getElementById('fleetGrid');
+            const agentList = Object.values(agents);
+            
+            if (agentList.length === 0) {
+                grid.innerHTML = '<div class="loading">No agents registered</div>';
+                return;
+            }
+            
+            grid.innerHTML = agentList.map(agent => {
+                const orgColor = agent.orgColor || 'var(--org-internal)';
+                const orgName = agent.org ? agent.org.toUpperCase() : 'INTERNAL';
+                return `
+                <div class="agent-card ${focusedAgent === agent.agentId ? 'focused' : ''}" 
+                     onclick="focusAgent('${agent.agentId}')"
+                     style="border-left: 3px solid ${orgColor};">
+                    <div class="agent-header">
+                        <div class="agent-name">
+                            <span class="agent-id">${agent.name || agent.agentId}</span>
+                            <span class="org-badge" style="background: ${orgColor}22; color: ${orgColor};">${orgName}</span>
+                        </div>
+                        <div class="agent-state">
+                            <button class="agent-configure-btn" onclick="event.stopPropagation(); openConfigureModal('${agent.agentId}')" title="Configure">&#9881;</button>
+                            <span class="state-dot ${agent.state}"></span>
+                            <span>${agent.state}</span>
+                        </div>
+                    </div>
+                    <div class="agent-task">${agent.task || 'No active task'}</div>
+                    <div class="agent-meta">
+                        <span class="model-select" onclick="event.stopPropagation(); toggleModelSelect('${agent.agentId}', this)">${modelDisplayName(agent.model)} &#9662;</span>
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <span>${Math.round(agent.contextPct || 0)}%</span>
+                            <div class="context-bar">
+                                <div class="context-fill ${agent.contextPct > 80 ? 'high' : ''}" 
+                                     style="width: ${agent.contextPct || 0}%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `}).join('');
+        }
+
+        function focusAgent(agentId) {
+            // Save scroll state of previous agent before switching
+            if (focusedAgent && focusedAgent !== agentId) {
+                saveScrollState(focusedAgent);
+                // Reset rendered count so new agent gets full render
+                lastRenderedCount[agentId] = 0;
+            }
+            
+            focusedAgent = agentId;
+            const agent = agents[agentId];
+            
+            // Update chat header
+            document.getElementById('chatAgentEmoji').textContent = agent?.emoji || '🤖';
+            document.getElementById('chatAgentName').textContent = agent?.name || agentId;
+            updateChatContext(agent);
+            
+            // Update thinking toggle state
+            updateThinkingToggle(agentThinking[agentId] || false);
+            
+            // Subscribe to agent messages
+            console.log('selectAgent:', agentId, 'ws:', ws, 'readyState:', ws?.readyState);
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                console.log('Sending subscribe for', agentId);
+                ws.send(JSON.stringify({
+                    type: 'subscribe',
+                    agentId: agentId
+                }));
+            } else {
+                console.warn('WebSocket not ready, cannot subscribe');
+            }
+            
+            // Switch to chat view
+            switchToChat();
+            renderFleet(); // Update focused state
+        }
+        
+        function updateChatContext(agent) {
+            if (!agent) return;
+            
+            // Token count - assume 200k max for now, calculate from contextPct
+            const maxTokens = agent.model === 'opus' ? 200000 : 200000;
+            const currentTokens = Math.round((agent.contextPct || 0) * maxTokens / 100);
+            const tokenEl = document.getElementById('chatTokenCount');
+            const dotEl = document.getElementById('chatStateDot');
+            
+            // Format: 45k/200k
+            const formatK = (n) => n >= 1000 ? Math.round(n/1000) + 'k' : n;
+            tokenEl.textContent = `${formatK(currentTokens)}/${formatK(maxTokens)}`;
+            tokenEl.className = 'token-count' + (agent.contextPct > 70 ? ' high' : '');
+            
+            // Update state dot
+            dotEl.className = 'state-dot ' + (agent.state || 'idle');
+        }
+
+        function renderChat(streamingUpdate = false) {
+            const container = document.getElementById('chatMessages');
+            const messages = messageHistory[focusedAgent] || [];
+            const lastCount = lastRenderedCount[focusedAgent] || 0;
+            
+            // Check if user was at bottom BEFORE any updates
+            const wasAtBottom = isAtBottom(container);
+            
+            // For streaming updates, only update the last message text (no full re-render)
+            if (streamingUpdate && messages.length > 0) {
+                const lastMsg = messages[messages.length - 1];
+                if (lastMsg._streaming) {
+                    const lastMsgEl = container.lastElementChild;
+                    if (lastMsgEl) {
+                        const textEl = lastMsgEl.querySelector('.message-text');
+                        if (textEl) {
+                            textEl.textContent = lastMsg.text;
+                            // Only auto-scroll if user was at bottom
+                            if (wasAtBottom) {
+                                container.scrollTop = container.scrollHeight;
+                            }
+                            return;
+                        }
+                    }
+                }
+            }
+            
+            // If message count is same or less, skip (no new messages)
+            // But if container is empty, we need to render
+            if (container.children.length > 0 && messages.length <= lastCount) {
+                return;
+            }
+            
+            // If this is a new agent or history was cleared, full render
+            if (container.children.length === 0 || lastCount === 0) {
+                // Full render using fragment for efficiency
+                const fragment = document.createDocumentFragment();
+                messages.forEach(msg => {
+                    fragment.appendChild(createMessageElement(msg));
+                });
+                container.innerHTML = '';
+                container.appendChild(fragment);
+                lastRenderedCount[focusedAgent] = messages.length;
+                
+                // Restore scroll position or go to bottom
+                const savedPos = scrollPositions[focusedAgent];
+                if (savedPos && !savedPos.isAtBottom) {
+                    container.scrollTop = savedPos.scrollTop;
+                } else {
+                    container.scrollTop = container.scrollHeight;
+                }
+                return;
+            }
+            
+            // Incremental append - only add new messages
+            const newMessages = messages.slice(lastCount);
+            const fragment = document.createDocumentFragment();
+            newMessages.forEach(msg => {
+                fragment.appendChild(createMessageElement(msg));
+            });
+            container.appendChild(fragment);
+            lastRenderedCount[focusedAgent] = messages.length;
+            
+            // Only auto-scroll if user was at bottom
+            if (wasAtBottom) {
+                container.scrollTop = container.scrollHeight;
+            }
+        }
+        
+        // Create a single message element
+        function createMessageElement(msg) {
+            const ts = msg.ts ? new Date(msg.ts).toLocaleTimeString('en-US', {hour: '2-digit', minute: '2-digit', hour12: false}) : '';
+            const role = msg.role === 'user' ? 'you' : focusedAgent;
+            const div = document.createElement('div');
+            div.className = `message ${msg.role}`;
+            div.innerHTML = `<span class="message-content"><span class="message-ts">[${ts}]</span><span class="message-role">${role}:</span><span class="message-text">${escapeHtml(msg.text)}</span></span>`;
+            return div;
+        }
+
+        function handleInputKey(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                sendMessage();
+            }
+        }
+
+        function sendMessage() {
+            const input = document.getElementById('chatInput');
+            const text = input.value.trim();
+            
+            if (!text || !focusedAgent) return;
+            
+            // Add to local history immediately
+            if (!messageHistory[focusedAgent]) {
+                messageHistory[focusedAgent] = [];
+            }
+            messageHistory[focusedAgent].push({
+                role: 'user',
+                text: text,
+                ts: new Date().toISOString()
+            });
+            renderChat();
+            
+            // Send via WebSocket
+            console.log('sendMessage:', focusedAgent, 'ws:', ws, 'readyState:', ws?.readyState);
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                console.log('Sending message to', focusedAgent, ':', text.substring(0, 50));
+                ws.send(JSON.stringify({
+                    type: 'message',
+                    agentId: focusedAgent,
+                    payload: { text: text }
+                }));
+            } else {
+                console.warn('WebSocket not ready, cannot send message');
+            }
+            
+            input.value = '';
+        }
+
+        function toggleThinking() {
+            if (!focusedAgent) return;
+            
+            const current = agentThinking[focusedAgent] || false;
+            const newState = !current;
+            agentThinking[focusedAgent] = newState;
+            
+            // Update UI
+            updateThinkingToggle(newState);
+            
+            // Send command to agent
+            const command = newState ? '/reasoning on' : '/reasoning off';
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'message',
+                    agentId: focusedAgent,
+                    payload: { text: command }
+                }));
+                showToast(`Thinking ${newState ? 'enabled' : 'disabled'} for ${focusedAgent}`, 'success');
+            }
+        }
+
+        function updateThinkingToggle(isOn) {
+            const toggle = document.getElementById('thinkingToggle');
+            const label = document.getElementById('thinkingLabel');
+            if (toggle && label) {
+                toggle.classList.toggle('active', isOn);
+                label.textContent = isOn ? 'On' : 'Off';
+            }
+        }
+
+        function switchToFleet() {
+            document.getElementById('fleetView').classList.remove('hidden');
+            document.getElementById('chatView').classList.remove('active');
+            document.getElementById('multiView').classList.remove('active');
+            document.querySelectorAll('.synapse-subnav button').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.view === 'fleet');
+            });
+        }
+
+        function switchToChat() {
+            document.getElementById('fleetView').classList.add('hidden');
+            document.getElementById('chatView').classList.add('active');
+            document.getElementById('multiView').classList.remove('active');
+            document.querySelectorAll('.synapse-subnav button').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.view === 'chat');
+            });
+        }
+
+        async function switchToMulti() {
+            document.getElementById('fleetView').classList.add('hidden');
+            document.getElementById('chatView').classList.remove('active');
+            document.getElementById('multiView').classList.add('active');
+            document.querySelectorAll('.synapse-subnav button').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.view === 'multi');
+            });
+            // Load models from gateway config, then initialize panes
+            await loadModelOptions();
+            initializeMultiPanes();
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Nav click handlers
+        document.querySelectorAll('.synapse-subnav button').forEach(btn => {
+            btn.addEventListener('click', () => {
+                if (btn.disabled) return;
+                const view = btn.dataset.view;
+                if (view === 'fleet') switchToFleet();
+                else if (view === 'chat') switchToChat();
+                else if (view === 'multi') switchToMulti();
+            });
+        });
+
+        // =====================
+        // Multi-Chat Functions
+        // =====================
+        
+        let paneAgents = [null, null, null, null]; // Which agent is in each pane
+        let paneSubscribed = [false, false, false, false]; // Subscription state
+        let paneThinking = [false, false, false, false]; // Thinking mode per pane
+        
+        // Persistence keys
+        const STORAGE_KEY_PANES = 'synapse_pane_agents';
+        const STORAGE_KEY_THINKING = 'synapse_pane_thinking';
+        
+        // Load persisted pane state from localStorage
+        function loadPaneState() {
+            try {
+                const saved = localStorage.getItem(STORAGE_KEY_PANES);
+                if (saved) {
+                    const parsed = JSON.parse(saved);
+                    if (Array.isArray(parsed) && parsed.length === 4) {
+                        paneAgents = parsed;
+                    }
+                }
+                const savedThinking = localStorage.getItem(STORAGE_KEY_THINKING);
+                if (savedThinking) {
+                    const parsed = JSON.parse(savedThinking);
+                    if (Array.isArray(parsed) && parsed.length === 4) {
+                        paneThinking = parsed;
+                    }
+                }
+            } catch (e) {
+                console.warn('Failed to load pane state:', e);
+            }
+        }
+        
+        // Save pane state to localStorage
+        function savePaneState() {
+            try {
+                localStorage.setItem(STORAGE_KEY_PANES, JSON.stringify(paneAgents));
+                localStorage.setItem(STORAGE_KEY_THINKING, JSON.stringify(paneThinking));
+            } catch (e) {
+                console.warn('Failed to save pane state:', e);
+            }
+        }
+        
+        function initializeMultiPanes() {
+            // Load persisted state first
+            loadPaneState();
+            
+            const agentList = Object.keys(agents);
+            for (let i = 0; i < 4; i++) {
+                // Use persisted agent if it still exists, otherwise auto-assign
+                if (paneAgents[i] && agents[paneAgents[i]]) {
+                    assignAgentToPane(i, paneAgents[i], true); // true = restore (don't save again)
+                } else if (!paneAgents[i] && agentList[i]) {
+                    assignAgentToPane(i, agentList[i]);
+                }
+                // Restore thinking toggle state
+                updatePaneThinkingToggle(i, paneThinking[i]);
+            }
+        }
+        
+        function assignAgentToPane(paneIdx, agentId, isRestore = false) {
+            // Reset render count for new agent assignment
+            const oldAgent = paneAgents[paneIdx];
+            if (oldAgent && oldAgent !== agentId) {
+                delete lastRenderedCount[`pane${paneIdx}:${oldAgent}`];
+            }
+            lastRenderedCount[`pane${paneIdx}:${agentId}`] = 0;
+            
+            paneAgents[paneIdx] = agentId;
+            const agent = agents[agentId];
+            const pane = document.getElementById(`pane${paneIdx}`);
+            pane.dataset.agent = agentId;
+            
+            // Update header with org color
+            const nameEl = document.getElementById(`pane${paneIdx}Name`);
+            const modelEl = document.getElementById(`pane${paneIdx}Model`);
+            const orgColor = agent?.orgColor || 'var(--org-internal)';
+            const orgName = agent?.org ? agent.org.toUpperCase() : '';
+            nameEl.innerHTML = agent 
+                ? `${agent.emoji || '🤖'} ${agent.name || agentId} <span class="org-badge" style="background: ${orgColor}22; color: ${orgColor}; margin-left: 0.5rem;">${orgName}</span>` 
+                : agentId;
+            
+            // Update model display
+            if (modelEl) {
+                const modelName = agent?.model ? modelDisplayName(agent.model) : '';
+                modelEl.innerHTML = modelName ? `${modelName} ▾` : '';
+                modelEl.style.display = modelName ? 'inline-block' : 'none';
+            }
+            
+            // Apply org color to pane border
+            const header = pane.querySelector('.pane-header');
+            header.style.borderLeft = `3px solid ${orgColor}`;
+            
+            // Subscribe to this agent (only if not already subscribed)
+            if (ws && ws.readyState === WebSocket.OPEN && !paneSubscribed[paneIdx]) {
+                ws.send(JSON.stringify({ type: 'subscribe', agentId: agentId }));
+                paneSubscribed[paneIdx] = true;
+            }
+            
+            // Render any existing messages
+            renderPaneMessages(paneIdx);
+            
+            // Persist state (unless restoring)
+            if (!isRestore) {
+                savePaneState();
+            }
+        }
+        
+        function clearPane(paneIdx) {
+            paneAgents[paneIdx] = null;
+            paneSubscribed[paneIdx] = false;
+            paneThinking[paneIdx] = false;
+            const pane = document.getElementById(`pane${paneIdx}`);
+            pane.dataset.agent = '';
+            document.getElementById(`pane${paneIdx}Name`).textContent = 'Click to select agent';
+            document.getElementById(`pane${paneIdx}Model`).innerHTML = '';
+            document.getElementById(`pane${paneIdx}Model`).style.display = 'none';
+            document.getElementById(`pane${paneIdx}Messages`).innerHTML = '';
+            document.getElementById(`pane${paneIdx}Dot`).className = 'pane-state-dot';
+            updatePaneThinkingToggle(paneIdx, false);
+            savePaneState();
+        }
+        
+        function renderPaneMessages(paneIdx, streamingUpdate = false) {
+            const agentId = paneAgents[paneIdx];
+            if (!agentId) return;
+            
+            const container = document.getElementById(`pane${paneIdx}Messages`);
+            const messages = messageHistory[agentId] || [];
+            const paneKey = `pane${paneIdx}:${agentId}`;
+            const lastCount = lastRenderedCount[paneKey] || 0;
+            
+            // Check if at bottom BEFORE updates
+            const wasAtBottom = isAtBottom(container);
+            
+            // For streaming updates, only update the last message text (no full re-render)
+            if (streamingUpdate && messages.length > 0) {
+                const lastMsg = messages[messages.length - 1];
+                if (lastMsg._streaming) {
+                    const lastMsgEl = container.lastElementChild;
+                    if (lastMsgEl) {
+                        const textEl = lastMsgEl.querySelector('.message-text');
+                        if (textEl) {
+                            textEl.textContent = lastMsg.text;
+                            if (wasAtBottom) {
+                                container.scrollTop = container.scrollHeight;
+                            }
+                            return;
+                        }
+                    }
+                }
+            }
+            
+            // If no new messages and container has content, skip
+            if (container.children.length > 0 && messages.length <= lastCount) {
+                return;
+            }
+            
+            // Full render if empty or first time
+            if (container.children.length === 0 || lastCount === 0) {
+                const fragment = document.createDocumentFragment();
+                messages.forEach(msg => {
+                    fragment.appendChild(createPaneMessageElement(msg, agentId));
+                });
+                container.innerHTML = '';
+                container.appendChild(fragment);
+                lastRenderedCount[paneKey] = messages.length;
+                container.scrollTop = container.scrollHeight;
+                return;
+            }
+            
+            // Incremental append
+            const newMessages = messages.slice(lastCount);
+            const fragment = document.createDocumentFragment();
+            newMessages.forEach(msg => {
+                fragment.appendChild(createPaneMessageElement(msg, agentId));
+            });
+            container.appendChild(fragment);
+            lastRenderedCount[paneKey] = messages.length;
+            
+            if (wasAtBottom) {
+                container.scrollTop = container.scrollHeight;
+            }
+        }
+        
+        function createPaneMessageElement(msg, agentId) {
+            const ts = msg.ts ? new Date(msg.ts).toLocaleTimeString('en-US', {hour: '2-digit', minute: '2-digit', hour12: false}) : '';
+            const role = msg.role === 'user' ? 'you' : agentId;
+            const div = document.createElement('div');
+            div.className = `message ${msg.role}`;
+            div.innerHTML = `<span class="message-content"><span class="message-ts">[${ts}]</span><span class="message-role">${role}:</span><span class="message-text">${escapeHtml(msg.text)}</span></span>`;
+            return div;
+        }
+        
+        function handlePaneInputKey(event, paneIdx) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                sendPaneMessage(paneIdx);
+            }
+        }
+        
+        function sendPaneMessage(paneIdx) {
+            const agentId = paneAgents[paneIdx];
+            if (!agentId) return;
+            
+            const input = document.getElementById(`pane${paneIdx}Input`);
+            const text = input.value.trim();
+            if (!text) return;
+            
+            // Add to local history
+            if (!messageHistory[agentId]) {
+                messageHistory[agentId] = [];
+            }
+            messageHistory[agentId].push({
+                role: 'user',
+                text: text,
+                ts: new Date().toISOString()
+            });
+            renderPaneMessages(paneIdx);
+            
+            // Send via WebSocket
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'message',
+                    agentId: agentId,
+                    payload: { text: text }
+                }));
+            }
+            
+            input.value = '';
+        }
+
+        function abortPane(paneIdx) {
+            const agentId = paneAgents[paneIdx];
+            if (!agentId) return;
+            
+            console.log('Aborting agent:', agentId);
+            
+            // Send abort via WebSocket
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'abort',
+                    agentId: agentId
+                }));
+            }
+            
+            // Immediately hide typing indicator (optimistic UI)
+            const typing = document.getElementById(`pane${paneIdx}Typing`);
+            if (typing) typing.classList.remove('visible');
+            
+            // Add a system message to history
+            if (!messageHistory[agentId]) {
+                messageHistory[agentId] = [];
+            }
+            messageHistory[agentId].push({
+                role: 'system',
+                text: '⏹ Generation stopped',
+                ts: new Date().toISOString()
+            });
+            renderPaneMessages(paneIdx);
+        }
+
+        function resetPane(paneIdx) {
+            const agentId = paneAgents[paneIdx];
+            if (!agentId) return;
+            
+            console.log('Resetting agent session:', agentId);
+            
+            // Send reset via WebSocket
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'reset',
+                    agentId: agentId
+                }));
+            }
+            
+            // Clear local message history
+            messageHistory[agentId] = [];
+            
+            // Add a system message indicating new chat
+            messageHistory[agentId].push({
+                role: 'system',
+                text: '✨ New chat started',
+                ts: new Date().toISOString()
+            });
+            renderPaneMessages(paneIdx);
+            
+            // Hide typing indicator
+            const typing = document.getElementById(`pane${paneIdx}Typing`);
+            if (typing) typing.classList.remove('visible');
+        }
+        
+        function togglePaneThinking(paneIdx) {
+            const agentId = paneAgents[paneIdx];
+            if (!agentId) return;
+            
+            const newState = !paneThinking[paneIdx];
+            paneThinking[paneIdx] = newState;
+            
+            // Update UI
+            updatePaneThinkingToggle(paneIdx, newState);
+            
+            // Send command to agent
+            const command = newState ? '/reasoning on' : '/reasoning off';
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'message',
+                    agentId: agentId,
+                    payload: { text: command }
+                }));
+            }
+            
+            // Persist state
+            savePaneState();
+            
+            const agentName = agents[agentId]?.name || agentId;
+            showToast(`Thinking ${newState ? 'enabled' : 'disabled'} for ${agentName}`, 'success');
+        }
+        
+        function updatePaneThinkingToggle(paneIdx, isOn) {
+            const btn = document.getElementById(`pane${paneIdx}Think`);
+            const label = document.getElementById(`pane${paneIdx}ThinkLabel`);
+            if (btn) {
+                btn.classList.toggle('active', isOn);
+                btn.title = isOn ? 'Extended Thinking: ON (click to disable)' : 'Extended Thinking: OFF (click to enable)';
+            }
+            if (label) {
+                label.textContent = isOn ? 'On' : 'Off';
+            }
+        }
+        
+        function updatePaneState(agentId, state) {
+            for (let i = 0; i < 4; i++) {
+                if (paneAgents[i] === agentId) {
+                    const dot = document.getElementById(`pane${i}Dot`);
+                    dot.className = 'pane-state-dot ' + (state || 'idle');
+                    
+                    const typing = document.getElementById(`pane${i}Typing`);
+                    if (state === 'working') {
+                        typing.classList.add('visible');
+                    } else {
+                        typing.classList.remove('visible');
+                    }
+                }
+            }
+        }
+        
+        function addMessageToPane(agentId, message) {
+            // Add to history
+            if (!messageHistory[agentId]) {
+                messageHistory[agentId] = [];
+            }
+            messageHistory[agentId].push(message);
+            
+            // Re-render any panes showing this agent
+            for (let i = 0; i < 4; i++) {
+                if (paneAgents[i] === agentId) {
+                    renderPaneMessages(i);
+                }
+            }
+            
+            // Also update single chat view if focused
+            if (focusedAgent === agentId) {
+                renderChat();
+            }
+        }
+        
+        // Click handler for pane headers to switch agents
+        document.querySelectorAll('.chat-pane').forEach((pane, idx) => {
+            pane.querySelector('.pane-header').addEventListener('click', (e) => {
+                // Don't open picker if clicking on buttons or model select
+                if (e.target.closest('.pane-header-actions')) return;
+                if (e.target.closest('.pane-model-select')) return;
+                if (e.target.closest('.pane-model-dropdown')) return;
+                // Show agent picker
+                showPaneAgentPicker(idx);
+            });
+        });
+        
+        function showPaneAgentPicker(paneIdx) {
+            const agentList = Object.entries(agents);
+            
+            // Group agents by organization
+            const byOrg = {};
+            agentList.forEach(([id, agent]) => {
+                const org = agent.org || 'internal';
+                if (!byOrg[org]) byOrg[org] = [];
+                byOrg[org].push([id, agent]);
+            });
+            
+            // Org display order and labels
+            const orgOrder = ['internal', 'novvi', 'xcognis'];
+            const orgLabels = { internal: 'Internal', novvi: 'Novvi', xcognis: 'X-Cognis' };
+            const orgColors = { internal: '#6366f1', novvi: '#10b981', xcognis: '#f59e0b' };
+            
+            const picker = document.createElement('div');
+            picker.className = 'pane-picker';
+            picker.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--elevated);border:1px solid var(--border);border-radius:4px;padding:0.5rem;z-index:1001;min-width:240px;max-height:400px;overflow-y:auto;';
+            
+            let html = `<div style="margin-bottom:0.5rem;font-size:0.8rem;color:var(--text-secondary);">Select agent for pane ${paneIdx + 1}</div>`;
+            
+            orgOrder.forEach(org => {
+                if (!byOrg[org] || byOrg[org].length === 0) return;
+                const color = orgColors[org];
+                html += `<div style="margin-top:0.5rem;margin-bottom:0.25rem;font-size:0.7rem;color:${color};text-transform:uppercase;letter-spacing:0.05em;">${orgLabels[org]}</div>`;
+                byOrg[org].forEach(([id, agent]) => {
+                    html += `<div class="picker-item" data-agent="${id}" style="padding:0.35rem 0.5rem;cursor:pointer;border-radius:3px;border-left:2px solid ${color};margin-left:0.25rem;">
+                        ${agent.emoji || '🤖'} ${agent.name || id}
+                    </div>`;
+                });
+            });
+            
+            picker.innerHTML = html;
+            
+            // Add hover styles
+            picker.querySelectorAll('.picker-item').forEach(item => {
+                item.addEventListener('mouseenter', () => item.style.background = 'var(--surface)');
+                item.addEventListener('mouseleave', () => item.style.background = 'transparent');
+                item.addEventListener('click', () => {
+                    assignAgentToPane(paneIdx, item.dataset.agent);
+                    document.body.removeChild(picker);
+                    document.body.removeChild(overlay);
+                });
+            });
+            
+            // Overlay to close
+            const overlay = document.createElement('div');
+            overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;';
+            overlay.addEventListener('click', () => {
+                document.body.removeChild(picker);
+                document.body.removeChild(overlay);
+            });
+            
+            document.body.appendChild(overlay);
+            document.body.appendChild(picker);
+        }
+
+        // =====================
+        // Command Bar (Sprint 3)
+        // =====================
+        
+        let commandBarOpen = false;
+        let selectedIndex = 0;
+        let commandItems = [];
+
+        // Built-in commands
+        const builtinCommands = [
+            { type: 'action', icon: '⚡', name: '/status', desc: 'Show agent status overview', action: () => showStatus() },
+            { type: 'action', icon: '📜', name: '/history', desc: 'Load recent chat history', action: () => loadHistory() },
+            { type: 'action', icon: '🔄', name: '/refresh', desc: 'Refresh agent data', action: () => refreshAgents() },
+            { type: 'action', icon: '🏠', name: '/fleet', desc: 'Switch to Fleet view', action: () => { switchToFleet(); closeCommandBar(); } },
+        ];
+
+        function openCommandBar() {
+            commandBarOpen = true;
+            document.getElementById('commandOverlay').classList.add('active');
+            document.getElementById('commandInput').value = '';
+            document.getElementById('commandInput').focus();
+            selectedIndex = 0;
+            filterCommands();
+        }
+
+        function closeCommandBar(event) {
+            if (event && event.target !== document.getElementById('commandOverlay')) return;
+            commandBarOpen = false;
+            document.getElementById('commandOverlay').classList.remove('active');
+        }
+
+        function filterCommands() {
+            const query = document.getElementById('commandInput').value.toLowerCase().trim();
+            const resultsEl = document.getElementById('commandResults');
+            commandItems = [];
+            let html = '';
+
+            // Check if it's a command (starts with /)
+            const isCommand = query.startsWith('/');
+            
+            // Agents section - grouped by org
+            const agentList = Object.values(agents);
+            const matchedAgents = agentList.filter(a => {
+                const name = (a.name || a.agentId).toLowerCase();
+                const orgName = (a.org || '').toLowerCase();
+                return !isCommand && (!query || name.includes(query) || orgName.includes(query) || fuzzyMatch(name, query));
+            });
+
+            if (matchedAgents.length > 0) {
+                // Group by org
+                const orgOrder = ['internal', 'novvi', 'xcognis'];
+                const orgLabels = { internal: 'Internal', novvi: 'Novvi', xcognis: 'X-Cognis' };
+                const orgColors = { internal: '#6366f1', novvi: '#10b981', xcognis: '#f59e0b' };
+                
+                const byOrg = {};
+                matchedAgents.forEach(agent => {
+                    const org = agent.org || 'internal';
+                    if (!byOrg[org]) byOrg[org] = [];
+                    byOrg[org].push(agent);
+                });
+                
+                orgOrder.forEach(org => {
+                    if (!byOrg[org] || byOrg[org].length === 0) return;
+                    const color = orgColors[org];
+                    html += `<div class="command-section">
+                        <div class="command-section-title" style="color:${color};">${orgLabels[org]}</div>`;
+                    byOrg[org].forEach(agent => {
+                        commandItems.push({ type: 'agent', agent });
+                        const idx = commandItems.length - 1;
+                        html += `<div class="command-item ${idx === selectedIndex ? 'selected' : ''}" 
+                                      data-index="${idx}" onclick="selectCommand(${idx})"
+                                      style="border-left:2px solid ${color};">
+                            <span class="command-item-icon">${agent.emoji || '🤖'}</span>
+                            <div class="command-item-text">
+                                <div class="command-item-name">${agent.name || agent.agentId}</div>
+                                <div class="command-item-desc">${agent.state} · ${agent.model}</div>
+                            </div>
+                        </div>`;
+                    });
+                    html += '</div>';
+                });
+            }
+
+            // Commands section
+            const matchedCommands = builtinCommands.filter(c => {
+                return !query || c.name.toLowerCase().includes(query) || c.desc.toLowerCase().includes(query);
+            });
+
+            if (matchedCommands.length > 0) {
+                html += `<div class="command-section">
+                    <div class="command-section-title">Commands</div>`;
+                matchedCommands.forEach(cmd => {
+                    commandItems.push(cmd);
+                    const idx = commandItems.length - 1;
+                    html += `<div class="command-item ${idx === selectedIndex ? 'selected' : ''}" 
+                                  data-index="${idx}" onclick="selectCommand(${idx})">
+                        <span class="command-item-icon">${cmd.icon}</span>
+                        <div class="command-item-text">
+                            <div class="command-item-name">${cmd.name}</div>
+                            <div class="command-item-desc">${cmd.desc}</div>
+                        </div>
+                    </div>`;
+                });
+                html += '</div>';
+            }
+
+            if (commandItems.length === 0) {
+                html = '<div class="loading">No matches found</div>';
+            }
+
+            resultsEl.innerHTML = html;
+            
+            // Ensure selection is in bounds
+            if (selectedIndex >= commandItems.length) {
+                selectedIndex = Math.max(0, commandItems.length - 1);
+                updateSelection();
+            }
+        }
+
+        function fuzzyMatch(str, pattern) {
+            let patternIdx = 0;
+            for (let i = 0; i < str.length && patternIdx < pattern.length; i++) {
+                if (str[i] === pattern[patternIdx]) patternIdx++;
+            }
+            return patternIdx === pattern.length;
+        }
+
+        function updateSelection() {
+            document.querySelectorAll('.command-item').forEach((el, idx) => {
+                el.classList.toggle('selected', idx === selectedIndex);
+            });
+            // Scroll selected into view
+            const selected = document.querySelector('.command-item.selected');
+            if (selected) selected.scrollIntoView({ block: 'nearest' });
+        }
+
+        function handleCommandKey(event) {
+            if (event.key === 'Escape') {
+                closeCommandBar();
+                return;
+            }
+            if (event.key === 'ArrowDown') {
+                event.preventDefault();
+                selectedIndex = Math.min(selectedIndex + 1, commandItems.length - 1);
+                updateSelection();
+                return;
+            }
+            if (event.key === 'ArrowUp') {
+                event.preventDefault();
+                selectedIndex = Math.max(selectedIndex - 1, 0);
+                updateSelection();
+                return;
+            }
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                selectCommand(selectedIndex);
+                return;
+            }
+        }
+
+        function selectCommand(index) {
+            const item = commandItems[index];
+            if (!item) return;
+            
+            if (item.type === 'agent') {
+                focusAgent(item.agent.agentId);
+                closeCommandBar();
+            } else if (item.type === 'action' && item.action) {
+                item.action();
+                closeCommandBar();
+            }
+        }
+
+        // Command implementations
+        function showStatus() {
+            const agentList = Object.values(agents);
+            const working = agentList.filter(a => a.state === 'working').length;
+            const idle = agentList.filter(a => a.state === 'idle').length;
+            const highCtx = agentList.filter(a => a.contextPct > 80).length;
+            showToast(`Fleet: ${agentList.length} agents | ${working} working | ${idle} idle | ${highCtx} high ctx`, 'info');
+        }
+
+        function loadHistory() {
+            if (!focusedAgent) {
+                showToast('Select an agent first', 'warning');
+                return;
+            }
+            setChatLoading(true, `Loading ${focusedAgent} history...`);
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'history',
+                    agentId: focusedAgent,
+                    payload: { limit: 50 }
+                }));
+            }
+            // Timeout fallback if no response
+            setTimeout(() => setChatLoading(false), 10000);
+        }
+
+        function refreshAgents() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'status_all' }));
+            }
+        }
+
+        // Global keyboard shortcut (Cmd/Ctrl + K)
+        document.addEventListener('keydown', (event) => {
+            // Cmd+K or Ctrl+K
+            if ((event.metaKey || event.ctrlKey) && event.key === 'k') {
+                event.preventDefault();
+                if (commandBarOpen) {
+                    closeCommandBar();
+                } else {
+                    openCommandBar();
+                }
+            }
+            // Escape to close
+            if (event.key === 'Escape' && commandBarOpen) {
+                closeCommandBar();
+            }
+        });
+
+        // Chat loading overlay
+        function setChatLoading(loading, text = 'Loading history...') {
+            const overlay = document.getElementById('chatLoadingOverlay');
+            document.getElementById('chatLoadingText').textContent = text;
+            if (loading) {
+                overlay.classList.add('visible');
+            } else {
+                overlay.classList.remove('visible');
+            }
+        }
+        
+        // Connection quality tracking
+        let lastPingTime = null;
+        let latencyHistory = [];
+        let pingInterval = null;
+        
+        function startPingMonitor() {
+            // Send ping every 10 seconds when connected
+            pingInterval = setInterval(() => {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    lastPingTime = performance.now();
+                    ws.send(JSON.stringify({ type: 'ping' }));
+                }
+            }, 10000);
+        }
+        
+        function handlePong() {
+            if (lastPingTime) {
+                const latency = Math.round(performance.now() - lastPingTime);
+                latencyHistory.push(latency);
+                if (latencyHistory.length > 5) latencyHistory.shift();
+                updateConnectionQuality(latency);
+                lastPingTime = null;
+            }
+        }
+        
+        function updateConnectionQuality(latency) {
+            const qualityEl = document.getElementById('connQuality');
+            const latencyEl = document.getElementById('connLatency');
+            const bars = [
+                document.getElementById('qBar1'),
+                document.getElementById('qBar2'),
+                document.getElementById('qBar3'),
+                document.getElementById('qBar4')
+            ];
+            
+            qualityEl.style.display = 'flex';
+            latencyEl.textContent = latency + 'ms';
+            
+            // Determine quality level (1-4 bars)
+            let level = 4;
+            let quality = 'active';
+            if (latency > 500) { level = 1; quality = 'error'; }
+            else if (latency > 300) { level = 2; quality = 'warning'; }
+            else if (latency > 150) { level = 3; quality = 'active'; }
+            
+            bars.forEach((bar, i) => {
+                bar.className = 'conn-quality-bar';
+                if (i < level) bar.classList.add(quality);
+            });
+        }
+        
+        function stopPingMonitor() {
+            if (pingInterval) {
+                clearInterval(pingInterval);
+                pingInterval = null;
+            }
+            document.getElementById('connQuality').style.display = 'none';
+        }
+        
+        // Toast notification system
+        function showToast(message, type = 'info') {
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            toast.textContent = message;
+            document.getElementById('toastContainer').appendChild(toast);
+            
+            // Animate in
+            setTimeout(() => toast.classList.add('visible'), 10);
+            
+            // Auto-remove after 3s
+            setTimeout(() => {
+                toast.classList.remove('visible');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+        
+        // Model selector
+        // Loaded dynamically from gateway config via /api/synapse/models
+        let MODEL_OPTIONS = [];
+
+        async function loadModelOptions() {
+            try {
+                const resp = await fetch('/api/synapse/models');
+                if (resp.ok) {
+                    const data = await resp.json();
+                    MODEL_OPTIONS = (data.models || []).map(m => ({
+                        id: m.id,
+                        label: m.label,
+                        aliases: m.alias ? [m.alias] : []
+                    }));
+                }
+            } catch (e) {
+                console.warn('[SYNAPSE] Failed to load model options:', e);
+            }
+        }
+
+        function modelDisplayName(modelId) {
+            if (!modelId) return '';
+            // Check direct ID match or alias match
+            const opt = MODEL_OPTIONS.find(m => 
+                m.id === modelId || (m.aliases && m.aliases.includes(modelId))
+            );
+            return opt ? opt.label : modelId;
+        }
+        
+        function modelToId(modelName) {
+            // Convert short name to full ID
+            const opt = MODEL_OPTIONS.find(m => 
+                m.id === modelName || (m.aliases && m.aliases.includes(modelName))
+            );
+            return opt ? opt.id : modelName;
+        }
+
+        function toggleModelSelect(agentId, el) {
+            // Close any existing dropdown
+            document.querySelectorAll('.model-dropdown').forEach(d => d.remove());
+
+            const agent = agents[agentId];
+            const currentRaw = agent?.model || '';
+            const current = modelToId(currentRaw);  // Normalize to full ID
+
+            const dropdown = document.createElement('div');
+            dropdown.className = 'model-dropdown';
+            dropdown.innerHTML = MODEL_OPTIONS.map(m => {
+                const isActive = m.id === current || (m.aliases && m.aliases.includes(currentRaw));
+                return `<div class="model-option ${isActive ? 'active' : ''}"
+                     onclick="event.stopPropagation(); setAgentModel('${agentId}', '${m.id}')">${m.label}${isActive ? ' ✓' : ''}</div>`;
+            }).join('');
+
+            const meta = el.closest('.agent-meta');
+            meta.appendChild(dropdown);
+
+            // Close on outside click
+            const close = (e) => { if (!dropdown.contains(e.target) && e.target !== el) { dropdown.remove(); document.removeEventListener('click', close); } };
+            setTimeout(() => document.addEventListener('click', close), 0);
+        }
+
+        async function setAgentModel(agentId, model) {
+            document.querySelectorAll('.model-dropdown').forEach(d => d.remove());
+            document.querySelectorAll('.pane-model-dropdown').forEach(d => d.remove());
+            try {
+                const resp = await fetch(`/api/synapse/agent/${agentId}/model`, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ model })
+                });
+                if (resp.ok) {
+                    agents[agentId].model = model;
+                    renderFleet();
+                    // Update pane model displays
+                    paneAgents.forEach((paneAgentId, idx) => {
+                        if (paneAgentId === agentId) {
+                            const modelEl = document.getElementById(`pane${idx}Model`);
+                            if (modelEl) {
+                                modelEl.innerHTML = `${modelDisplayName(model)} ▾`;
+                            }
+                        }
+                    });
+                    showToast(`${agents[agentId]?.name || agentId} → ${modelDisplayName(model)}`, 'success');
+                } else {
+                    const err = await resp.json();
+                    showToast(err.error || 'Failed', 'error');
+                }
+            } catch (e) {
+                showToast('Failed to update model', 'error');
+            }
+        }
+
+        function togglePaneModelSelect(paneIdx, el) {
+            // Close any existing dropdowns
+            document.querySelectorAll('.pane-model-dropdown').forEach(d => d.remove());
+            document.querySelectorAll('.model-dropdown').forEach(d => d.remove());
+
+            const agentId = paneAgents[paneIdx];
+            if (!agentId) return;
+            
+            const agent = agents[agentId];
+            const currentRaw = agent?.model || '';
+            const current = modelToId(currentRaw);  // Normalize to full ID
+
+            const dropdown = document.createElement('div');
+            dropdown.className = 'pane-model-dropdown';
+            dropdown.innerHTML = MODEL_OPTIONS.map(m => {
+                const isActive = m.id === current || (m.aliases && m.aliases.includes(currentRaw));
+                return `<div class="pane-model-option ${isActive ? 'active' : ''}"
+                     onclick="event.stopPropagation(); setAgentModel('${agentId}', '${m.id}')">${m.label}${isActive ? ' ✓' : ''}</div>`;
+            }).join('');
+
+            el.style.position = 'relative';
+            el.appendChild(dropdown);
+
+            // Close on outside click
+            const close = (e) => { 
+                if (!dropdown.contains(e.target) && e.target !== el) { 
+                    dropdown.remove(); 
+                    document.removeEventListener('click', close); 
+                } 
+            };
+            setTimeout(() => document.addEventListener('click', close), 0);
+        }
+
+        // Typing indicator
+        function setAgentTyping(agentId, isTyping) {
+            agentTyping[agentId] = isTyping;
+            if (focusedAgent === agentId) {
+                updateTypingIndicator();
+            }
+        }
+        
+        function updateTypingIndicator() {
+            const indicator = document.getElementById('typingIndicator');
+            if (agentTyping[focusedAgent]) {
+                indicator.classList.add('visible');
+            } else {
+                indicator.classList.remove('visible');
+            }
+        }
+        
+        // Show loading state in fleet
+        function setFleetLoading(loading) {
+            const grid = document.getElementById('fleetGrid');
+            if (loading && Object.keys(agents).length === 0) {
+                grid.innerHTML = '<div class="loading"><span class="spinner"></span>Loading agents...</div>';
+            }
+        }
+
+        // =====================
+        // Configure Modal
+        // =====================
+
+        const EDITABLE_TABS = ['soulMd', 'agentsMd'];
+        const READONLY_TABS = ['workingMd'];
+        const TAB_HINTS = {
+            soulMd: 'Editable — takes effect next session',
+            agentsMd: 'Editable — takes effect next session',
+            workingMd: 'Read-only — live agent working state'
+        };
+
+        let configState = {
+            agentId: null,
+            activeTab: 'soulMd',
+            data: { soulMd: '', agentsMd: '', workingMd: '' }
+        };
+
+        async function openConfigureModal(agentId) {
+            const agent = agents[agentId];
+            if (!agent) return;
+
+            configState.agentId = agentId;
+            configState.activeTab = null;  // Prevent switchConfigTab from saving empty editor
+
+            // Update header
+            document.getElementById('configAgentEmoji').textContent = agent.emoji || '\u{1F916}';
+            document.getElementById('configAgentName').textContent = agent.name || agentId;
+            document.getElementById('configureStatus').textContent = 'Loading...';
+            document.getElementById('configWorkspacePath').textContent = '';
+            document.getElementById('configEditHint').textContent = '';
+
+            // Show modal
+            document.getElementById('configureOverlay').classList.add('active');
+
+            // Fetch config from API
+            try {
+                const resp = await fetch(`/api/synapse/agent/${agentId}/config`);
+                if (!resp.ok) throw new Error('Failed to load');
+                const data = await resp.json();
+                configState.data = {
+                    soulMd: data.soulMd || '',
+                    agentsMd: data.agentsMd || '',
+                    workingMd: data.workingMd || ''
+                };
+                document.getElementById('configWorkspacePath').textContent = data.workspace || '';
+                document.getElementById('configureStatus').textContent = '';
+            } catch (err) {
+                configState.data = { soulMd: '', agentsMd: '', workingMd: '' };
+                document.getElementById('configureStatus').textContent = 'Failed to load workspace files';
+            }
+
+            // Activate first tab
+            switchConfigTab('soulMd');
+        }
+
+        function closeConfigureModal(event) {
+            if (event && event.target !== document.getElementById('configureOverlay')) return;
+            document.getElementById('configureOverlay').classList.remove('active');
+            configState.agentId = null;
+        }
+
+        function switchConfigTab(tab) {
+            const editor = document.getElementById('configureEditor');
+            const saveBtn = document.getElementById('configSaveBtn');
+            const isReadonly = READONLY_TABS.includes(tab);
+
+            // Save current editor content to state (only if editable)
+            if (configState.activeTab && EDITABLE_TABS.includes(configState.activeTab)) {
+                configState.data[configState.activeTab] = editor.value;
+            }
+
+            configState.activeTab = tab;
+            editor.value = configState.data[tab] || '';
+
+            // Toggle read-only
+            editor.readOnly = isReadonly;
+            editor.classList.toggle('readonly', isReadonly);
+            saveBtn.style.display = isReadonly ? 'none' : '';
+
+            // Update hint
+            document.getElementById('configEditHint').textContent = TAB_HINTS[tab] || '';
+
+            // Update tab button styles
+            document.querySelectorAll('#configureTabs button').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.tab === tab);
+            });
+
+            if (!isReadonly) editor.focus();
+        }
+
+        async function saveAgentConfig() {
+            if (!configState.agentId) return;
+            if (READONLY_TABS.includes(configState.activeTab)) return;
+
+            // Save current editor content to state
+            const editor = document.getElementById('configureEditor');
+            configState.data[configState.activeTab] = editor.value;
+
+            document.getElementById('configureStatus').textContent = 'Saving (versioned)...';
+
+            // Only send editable fields
+            const payload = {};
+            EDITABLE_TABS.forEach(k => { payload[k] = configState.data[k]; });
+
+            try {
+                const resp = await fetch(`/api/synapse/agent/${configState.agentId}/config`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!resp.ok) throw new Error('Save failed');
+                document.getElementById('configureStatus').textContent = '';
+                showToast(`Saved — takes effect next session for ${agents[configState.agentId]?.name || configState.agentId}`, 'success');
+            } catch (err) {
+                document.getElementById('configureStatus').textContent = 'Save failed';
+                showToast('Failed to save workspace files', 'error');
+            }
+        }
+
+        // Close configure modal on Escape
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && document.getElementById('configureOverlay').classList.contains('active')) {
+                closeConfigureModal();
+                event.stopPropagation();
+            }
+        });
+
+        // Initialize
+        setFleetLoading(true);
+        loadModelOptions().then(() => connect());
+    </script>
+</body>
+</html>

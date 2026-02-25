@@ -1,0 +1,1756 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Synapse — Multi-Pane Agent Interface</title>
+<style>
+/* ═══════════════════════════════════════════════════════════════
+   IDE-NOIR PALETTE
+   ═══════════════════════════════════════════════════════════════ */
+:root {
+  --nx-bg:          #0d1117;
+  --nx-bg-raised:   #161b22;
+  --nx-bg-surface:  #1c2128;
+  --nx-bg-input:    #0d1117;
+  --nx-border:      #30363d;
+  --nx-border-light:#484f58;
+  --nx-text:        #e6edf3;
+  --nx-text-dim:    #8b949e;
+  --nx-text-muted:  #484f58;
+  --nx-cyan:        #00e5ff;
+  --nx-cyan-dim:    rgba(0, 229, 255, 0.15);
+  --nx-green:       #3fb950;
+  --nx-yellow:      #d29922;
+  --nx-orange:      #db6d28;
+  --nx-red:         #f85149;
+  --nx-purple:      #bc8cff;
+  --nx-blue:        #58a6ff;
+  --nx-font-mono:   'SF Mono', 'Cascadia Code', 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+  --nx-font-size:   13px;
+  --nx-radius:      6px;
+  --nx-gap:         4px;
+  --nx-cols:        2;
+  --nx-rows:        2;
+  --nx-topbar-h:    42px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   RESET & BASE
+   ═══════════════════════════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--nx-bg);
+  color: var(--nx-text);
+  font-family: var(--nx-font-mono);
+  font-size: var(--nx-font-size);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--nx-cyan-dim);
+  color: var(--nx-cyan);
+}
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--nx-border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--nx-border-light); }
+
+/* ═══════════════════════════════════════════════════════════════
+   TOPBAR
+   ═══════════════════════════════════════════════════════════════ */
+#topbar {
+  display: flex;
+  align-items: center;
+  height: var(--nx-topbar-h);
+  padding: 0 12px;
+  background: var(--nx-bg-raised);
+  border-bottom: 1px solid var(--nx-border);
+  gap: 16px;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+#topbar .logo {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--nx-cyan);
+  text-transform: uppercase;
+}
+
+#topbar .separator {
+  width: 1px;
+  height: 20px;
+  background: var(--nx-border);
+}
+
+#topbar label {
+  color: var(--nx-text-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+#layout-select {
+  background: var(--nx-bg-surface);
+  color: var(--nx-text);
+  border: 1px solid var(--nx-border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-family: var(--nx-font-mono);
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+}
+#layout-select:focus { border-color: var(--nx-cyan); }
+#layout-select option { background: var(--nx-bg-surface); }
+
+.topbar-status {
+  color: var(--nx-text-dim);
+  font-size: 11px;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.topbar-status .ws-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--nx-red);
+  transition: background 0.3s;
+}
+.topbar-status .ws-dot.connected { background: var(--nx-green); }
+.topbar-status .ws-dot.connecting { background: var(--nx-yellow); }
+
+/* ═══════════════════════════════════════════════════════════════
+   GRID CONTAINER
+   ═══════════════════════════════════════════════════════════════ */
+#nexus-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--nx-cols), minmax(0, 1fr));
+  grid-template-rows: repeat(var(--nx-rows), minmax(0, 1fr));
+  gap: var(--nx-gap);
+  padding: var(--nx-gap);
+  height: calc(100vh - var(--nx-topbar-h));
+  overflow: hidden;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PANE
+   ═══════════════════════════════════════════════════════════════ */
+.nx-pane {
+  display: flex;
+  flex-direction: column;
+  background: var(--nx-bg-raised);
+  border: 1px solid var(--nx-border);
+  border-radius: var(--nx-radius);
+  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  position: relative;
+}
+
+/* Focus state — cyan glow */
+.nx-pane.focused {
+  border-color: var(--nx-cyan);
+  box-shadow: 0 0 0 1px var(--nx-cyan), 0 0 20px rgba(0, 229, 255, 0.1);
+}
+
+/* Unread state — cyan left border */
+.nx-pane.unread {
+  border-left: 4px solid var(--nx-cyan);
+}
+
+/* Error state */
+.nx-pane.error {
+  border-color: var(--nx-red);
+}
+
+/* Organization color accents */
+.nx-pane.org-internal::after { border-color: #6366f1; }
+.nx-pane.org-novvi::after { border-color: #10b981; }
+.nx-pane.org-xcognis::after { border-color: #f59e0b; }
+
+.nx-pane::after {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: -1px;
+  right: -1px;
+  bottom: -1px;
+  border: 1px solid transparent;
+  border-radius: var(--nx-radius);
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PANE HEADER
+   ═══════════════════════════════════════════════════════════════ */
+.pane-header {
+  display: flex;
+  align-items: center;
+  height: 34px;
+  padding: 0 10px;
+  background: var(--nx-bg-surface);
+  border-bottom: 1px solid var(--nx-border);
+  gap: 8px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.agent-emoji {
+  font-size: 14px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.agent-select {
+  background: transparent;
+  color: var(--nx-text);
+  border: none;
+  font-family: var(--nx-font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+  padding: 2px 4px;
+  border-radius: 3px;
+  min-width: 0;
+  max-width: 140px;
+}
+.agent-select:hover { background: var(--nx-bg); }
+.agent-select:focus { background: var(--nx-bg); outline: 1px solid var(--nx-cyan); }
+.agent-select option {
+  background: var(--nx-bg-surface);
+  color: var(--nx-text);
+  font-family: var(--nx-font-mono);
+  padding: 4px;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  transition: background 0.3s;
+}
+.status-dot.idle      { background: var(--nx-text-muted); }
+.status-dot.working   { background: var(--nx-green); animation: pulse-dot 1.5s infinite; }
+.status-dot.blocked,
+.status-dot.waiting   { background: var(--nx-yellow); }
+.status-dot.error     { background: var(--nx-red); }
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.4; }
+}
+
+.pane-header .spacer { flex: 1; }
+
+.unread-badge {
+  display: none;
+  background: var(--nx-cyan);
+  color: var(--nx-bg);
+  font-size: 10px;
+  font-weight: 700;
+  min-width: 18px;
+  height: 18px;
+  line-height: 18px;
+  text-align: center;
+  border-radius: 9px;
+  padding: 0 5px;
+}
+.nx-pane.unread .unread-badge { display: inline-block; }
+
+.org-tag {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  padding: 2px 5px;
+  border-radius: 3px;
+  background: rgba(0, 229, 255, 0.1);
+  color: var(--nx-cyan);
+  flex-shrink: 0;
+}
+.org-tag.novvi { background: rgba(255, 145, 0, 0.1); color: var(--nx-orange); }
+.org-tag.xcognis { background: rgba(188, 140, 255, 0.1); color: var(--nx-purple); }
+
+.model-dropdown {
+  background: transparent;
+  color: var(--nx-text-dim);
+  border: none;
+  font-family: var(--nx-font-mono);
+  font-size: 11px;
+  cursor: pointer;
+  outline: none;
+  padding: 2px 4px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+.model-dropdown:hover { 
+  background: var(--nx-bg);
+  color: var(--nx-text);
+}
+.model-dropdown:focus { 
+  background: var(--nx-bg); 
+  outline: 1px solid var(--nx-cyan); 
+}
+.model-dropdown option {
+  background: var(--nx-bg-surface);
+  color: var(--nx-text);
+  font-family: var(--nx-font-mono);
+  padding: 4px;
+}
+
+.token-counter {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--nx-text-dim);
+}
+.token-text {
+  font-weight: 600;
+  min-width: 45px;
+}
+.token-bar {
+  width: 40px;
+  height: 3px;
+  background: var(--nx-border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.token-fill {
+  height: 100%;
+  transition: width 0.3s, background 0.3s;
+  border-radius: 2px;
+}
+.token-fill.low { background: var(--nx-green); }
+.token-fill.medium { background: var(--nx-yellow); }
+.token-fill.high { background: var(--nx-orange); }
+.token-fill.critical { background: var(--nx-red); }
+
+.pane-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.pane-btn {
+  background: none;
+  border: none;
+  color: var(--nx-text-muted);
+  font-family: var(--nx-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  height: 24px;
+  padding: 0 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.pane-btn:hover {
+  background: var(--nx-bg);
+  color: var(--nx-text);
+}
+.pane-btn.thinking {
+  gap: 2px;
+}
+.pane-btn.thinking .think-label {
+  font-size: 9px;
+  font-weight: 600;
+}
+.pane-btn.thinking.active {
+  color: var(--nx-cyan);
+  background: var(--nx-cyan-dim);
+}
+
+.pane-id-label {
+  color: var(--nx-text-muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   MESSAGE AREA
+   ═══════════════════════════════════════════════════════════════ */
+.pane-messages {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px 12px;
+  scroll-behavior: smooth;
+  min-height: 0;
+}
+
+.msg {
+  padding: 6px 0;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+.msg + .msg {
+  border-top: 1px solid rgba(48, 54, 61, 0.4);
+}
+
+.msg-role {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 2px;
+}
+.msg-role.user      { color: var(--nx-cyan); }
+.msg-role.assistant { color: var(--nx-purple); }
+
+.msg-text {
+  color: var(--nx-text);
+  white-space: pre-wrap;
+  font-size: var(--nx-font-size);
+  line-height: 1.55;
+}
+
+.msg-text code {
+  background: var(--nx-bg);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+.msg-text pre {
+  background: var(--nx-bg);
+  padding: 8px 10px;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 6px 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.msg-ts {
+  font-size: 9px;
+  color: var(--nx-text-muted);
+  margin-top: 2px;
+}
+
+/* Streaming indicator */
+.streaming-cursor::after {
+  content: '▊';
+  animation: blink-cursor 0.8s step-end infinite;
+  color: var(--nx-cyan);
+  margin-left: 1px;
+}
+
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0; }
+}
+
+/* New messages indicator */
+.new-messages-bar {
+  display: none;
+  position: absolute;
+  bottom: 52px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--nx-cyan);
+  color: var(--nx-bg);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 14px;
+  border-radius: 12px;
+  cursor: pointer;
+  z-index: 5;
+  box-shadow: 0 2px 8px rgba(0, 229, 255, 0.3);
+  transition: opacity 0.15s;
+}
+.new-messages-bar:hover { opacity: 0.9; }
+.new-messages-bar.visible { display: block; }
+
+/* Empty pane state */
+.pane-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  color: var(--nx-text-muted);
+  font-size: 12px;
+  gap: 8px;
+}
+.pane-empty .empty-icon { font-size: 28px; opacity: 0.4; }
+
+/* ═══════════════════════════════════════════════════════════════
+   INPUT BAR
+   ═══════════════════════════════════════════════════════════════ */
+.pane-input {
+  display: flex;
+  align-items: center;
+  padding: 6px 8px;
+  border-top: 1px solid var(--nx-border);
+  background: var(--nx-bg-surface);
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.pane-input input {
+  flex: 1;
+  background: var(--nx-bg-input);
+  color: var(--nx-text);
+  border: 1px solid var(--nx-border);
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-family: var(--nx-font-mono);
+  font-size: 12px;
+  outline: none;
+  min-width: 0;
+}
+.pane-input input:focus { border-color: var(--nx-cyan); }
+.pane-input input::placeholder { color: var(--nx-text-muted); }
+
+.pane-input button {
+  background: var(--nx-cyan);
+  color: var(--nx-bg);
+  border: none;
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-family: var(--nx-font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: opacity 0.15s;
+}
+.pane-input button:hover { opacity: 0.85; }
+.pane-input button:disabled { opacity: 0.4; cursor: not-allowed; }
+.tools-menu.show { display: block !important; }
+.tools-menu a:hover { background: rgba(88,166,255,0.12) !important; }
+#agentToolsBtn:hover { border-color: var(--nx-border-light); color: var(--nx-text); }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════ TOPBAR ═══════════════════ -->
+<div id="topbar">
+  <a href="/" class="logo-link" style="color:var(--nx-text-dim);text-decoration:none;font-size:11px;margin-right:4px;" title="Mission Control">MC</a>
+  <span class="logo" style="margin-right:2px;">Synapse</span>
+  <!-- Agent Tools dropdown -->
+  <div class="agent-tools-dropdown" style="position:relative;display:inline-block;">
+    <button id="agentToolsBtn" style="background:none;border:1px solid var(--nx-border);border-radius:4px;color:var(--nx-text-dim);font-family:inherit;font-size:12px;padding:2px 8px;cursor:pointer;display:flex;align-items:center;gap:4px;" onclick="document.getElementById('agentToolsMenu').classList.toggle('show')">
+      Tools ▾
+    </button>
+    <div id="agentToolsMenu" class="tools-menu" style="display:none;position:absolute;top:100%;left:0;margin-top:4px;background:var(--nx-bg-surface);border:1px solid var(--nx-border);border-radius:6px;min-width:180px;z-index:1000;box-shadow:0 8px 24px rgba(0,0,0,0.4);padding:4px 0;">
+      <a href="/synapse" style="display:block;padding:6px 12px;color:var(--nx-accent);text-decoration:none;font-size:13px;background:rgba(88,166,255,0.08);">◉ Multi-Chat</a>
+      <a href="/synapse#fleet" onclick="window._showFleet&&window._showFleet();return false;" style="display:block;padding:6px 12px;color:var(--nx-text);text-decoration:none;font-size:13px;">Fleet Manager</a>
+      <a href="/queue" style="display:block;padding:6px 12px;color:var(--nx-text);text-decoration:none;font-size:13px;">Pipeline &amp; Queue</a>
+      <a href="/activity" style="display:block;padding:6px 12px;color:var(--nx-text);text-decoration:none;font-size:13px;">Activity</a>
+      <a href="/cron" style="display:block;padding:6px 12px;color:var(--nx-text);text-decoration:none;font-size:13px;">Cron Jobs</a>
+      <a href="/crm" style="display:block;padding:6px 12px;color:var(--nx-text);text-decoration:none;font-size:13px;">Synapse CRM</a>
+      <div style="border-top:1px solid var(--nx-border);margin:4px 0;"></div>
+      <a href="/" style="display:block;padding:6px 12px;color:var(--nx-text-dim);text-decoration:none;font-size:12px;">← Mission Control</a>
+    </div>
+  </div>
+  <span class="separator"></span>
+  <a href="/rbot" style="color:var(--nx-text-dim);text-decoration:none;font-size:12px;padding:2px 6px;border:1px solid var(--nx-border);border-radius:4px;" onmouseover="this.style.color='var(--nx-text)';this.style.borderColor='var(--nx-border-light)'" onmouseout="this.style.color='var(--nx-text-dim)';this.style.borderColor='var(--nx-border)'">Research</a>
+  <span class="separator"></span>
+  <label for="layout-select">Layout</label>
+  <select id="layout-select"></select>
+  <span class="separator"></span>
+  <div class="topbar-status">
+    <span id="agent-count"></span>
+    <span class="separator"></span>
+    <div class="ws-dot" id="ws-indicator" title="WebSocket disconnected"></div>
+    <span id="ws-label">Disconnected</span>
+  </div>
+</div>
+
+<!-- ═══════════════════ GRID ═══════════════════ -->
+<div id="nexus-grid"></div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════
+   NEXUS v2 — Phase 1: Grid + Agent Router
+   ═══════════════════════════════════════════════════════════════ */
+(() => {
+'use strict';
+
+/* ───────── Constants ───────── */
+const MIN_PANE_W = 450;
+const MIN_PANE_H = 350;
+const TOPBAR_H   = 42;
+const SCROLL_THRESHOLD = 50; // px from bottom to engage follow-mode
+
+const FALLBACK_AGENTS = {
+  jarvis:  { agentId: 'jarvis',  name: 'Jarvis',    emoji: '🎩' },
+  atlas:   { agentId: 'atlas',   name: 'Atlas',     emoji: '🏛️' },
+  aria:    { agentId: 'aria',    name: 'Aria',      emoji: '🔬' },
+  peter:   { agentId: 'peter',   name: 'Peter',     emoji: '📈' },
+  watson:  { agentId: 'watson',  name: 'Dr. Watson', emoji: '🩺' },
+  elon:    { agentId: 'elon',    name: 'ELon',      emoji: '🚀' },
+  dewey:   { agentId: 'dewey',   name: 'Dewey',     emoji: '📚' },
+  ares:    { agentId: 'ares',    name: 'Ares',      emoji: '🛡️' },
+  willb:   { agentId: 'willb',   name: 'Will B.',   emoji: '🏢' },
+  jc:      { agentId: 'jc',      name: 'JC',        emoji: '🧪' },
+  xavier:  { agentId: 'xavier',  name: 'Xavier',    emoji: '🎯' },
+  xena:    { agentId: 'xena',    name: 'Xena',      emoji: '🔭' },
+  xander:  { agentId: 'xander',  name: 'Xander',    emoji: '🤝' },
+  xyla:    { agentId: 'xyla',    name: 'Xyla',      emoji: '🔧' },
+  ximena:  { agentId: 'ximena',  name: 'Ximena',    emoji: '📞' },
+  xerxes:  { agentId: 'xerxes',  name: 'Xerxes',    emoji: '💰' },
+  xeno:    { agentId: 'xeno',    name: 'Xeno',      emoji: '⚔️' },
+};
+
+const LAYOUT_PRESETS = [
+  { label: '1 pane',   cols: 1, rows: 1, count: 1 },
+  { label: '2 panes',  cols: 2, rows: 1, count: 2 },
+  { label: '4 panes — 2×2', cols: 2, rows: 2, count: 4 },
+  { label: '6 panes — 3×2', cols: 3, rows: 2, count: 6 },
+];
+
+/* ───────── State ───────── */
+const state = {
+  agents: {},               // agentId → { agentId, name, emoji, state, contextPct, ... }
+  panes: [],                // [ { id, agentId, followMode, unreadCount, messages[], streamText } ]
+  focusPane: 0,
+  layout: { cols: 2, rows: 2, count: 4 },
+  ws: null,
+  wsReconnectTimer: null,
+  wsReconnectDelay: 1000,
+  pingInterval: null,
+};
+
+/* ───────── DOM refs ───────── */
+const $grid        = document.getElementById('nexus-grid');
+const $layoutSel   = document.getElementById('layout-select');
+const $wsIndicator = document.getElementById('ws-indicator');
+const $wsLabel     = document.getElementById('ws-label');
+const $agentCount  = document.getElementById('agent-count');
+
+/* ═══════════════════════════════════════════════════════════════
+   LAYOUT ENGINE
+   ═══════════════════════════════════════════════════════════════ */
+
+function calcAvailableLayouts() {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight - TOPBAR_H;
+  return LAYOUT_PRESETS.filter(p => {
+    const cellW = vw / p.cols;
+    const cellH = vh / p.rows;
+    return cellW >= MIN_PANE_W && cellH >= MIN_PANE_H;
+  });
+}
+
+function populateLayoutSelector() {
+  const available = calcAvailableLayouts();
+  const prevVal = $layoutSel.value;
+  $layoutSel.innerHTML = '';
+  available.forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = `${p.cols}x${p.rows}`;
+    opt.textContent = p.label;
+    $layoutSel.appendChild(opt);
+  });
+  // Restore previous selection or pick best fit
+  if (prevVal && [...$layoutSel.options].some(o => o.value === prevVal)) {
+    $layoutSel.value = prevVal;
+  } else if (available.length) {
+    // Pick the largest available layout
+    $layoutSel.value = `${available[available.length - 1].cols}x${available[available.length - 1].rows}`;
+  }
+}
+
+function applyLayout(cols, rows) {
+  const count = cols * rows;
+  state.layout = { cols, rows, count };
+  document.documentElement.style.setProperty('--nx-cols', cols);
+  document.documentElement.style.setProperty('--nx-rows', rows);
+
+  // Add/remove panes to match count
+  while (state.panes.length < count) {
+    const id = state.panes.length;
+    state.panes.push({
+      id,
+      agentId: null,
+      followMode: true,
+      unreadCount: 0,
+      messages: [],
+      streamText: null,
+    });
+  }
+
+  renderGrid();
+
+  // Auto-assign agents to empty panes
+  const agentIds = Object.keys(state.agents);
+  const assigned = new Set(state.panes.slice(0, count).map(p => p.agentId).filter(Boolean));
+  for (let i = 0; i < count; i++) {
+    if (!state.panes[i].agentId) {
+      const next = agentIds.find(a => !assigned.has(a));
+      if (next) {
+        assignAgent(i, next);
+        assigned.add(next);
+      }
+    }
+  }
+
+  // Ensure focus pane is in range
+  if (state.focusPane >= count) setFocus(0);
+  saveNexusState();
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   RENDER
+   ═══════════════════════════════════════════════════════════════ */
+
+function renderGrid() {
+  const count = state.layout.count;
+  $grid.innerHTML = '';
+  for (let i = 0; i < count; i++) {
+    $grid.appendChild(createPaneElement(i));
+  }
+  updateAllPaneHeaders();
+  updateFocusVisuals();
+  // Re-render messages for each pane
+  for (let i = 0; i < count; i++) {
+    renderMessages(i);
+  }
+}
+
+function createPaneElement(paneId) {
+  const pane = state.panes[paneId];
+  const el = document.createElement('div');
+  el.className = 'nx-pane';
+  el.dataset.paneId = paneId;
+  if (pane.unreadCount > 0 && paneId !== state.focusPane) el.classList.add('unread');
+
+  el.innerHTML = `
+    <div class="pane-header">
+      <span class="agent-emoji" data-ref="emoji"></span>
+      <select class="agent-select" data-ref="select" title="Select agent"></select>
+      <span class="org-tag" data-ref="orgTag" style="display:none">INTERNAL</span>
+      <span class="status-dot idle" data-ref="statusDot"></span>
+      <select class="model-dropdown" data-ref="modelDropdown" style="display:none" title="Select model"></select>
+      <div class="token-counter" data-ref="tokenCounter" style="display:none" title="Context usage">
+        <span class="token-text" data-ref="tokenText">0/200K</span>
+        <div class="token-bar" data-ref="tokenBar"><div class="token-fill" data-ref="tokenFill"></div></div>
+      </div>
+      <span class="spacer"></span>
+      <span class="unread-badge" data-ref="badge">0</span>
+      <div class="pane-header-actions">
+        <button class="pane-btn thinking" data-ref="thinkBtn" title="Reasoning">R:<span class="think-label" data-ref="thinkLabel">Off</span></button>
+        <button class="pane-btn" data-ref="resetBtn" title="Reset Session">RST</button>
+        <button class="pane-btn" data-ref="refreshBtn" title="New Chat">NEW</button>
+        <button class="pane-btn" data-ref="closeBtn" title="Close Pane">×</button>
+      </div>
+      <span class="pane-id-label" data-ref="paneLabel"></span>
+    </div>
+    <div class="pane-messages" data-ref="messages"></div>
+    <div class="new-messages-bar" data-ref="newBar">↓ New messages</div>
+    <div class="pane-input">
+      <input type="text" placeholder="Message..." data-ref="input" />
+      <button data-ref="sendBtn">Send</button>
+    </div>
+  `;
+
+  const refs = {};
+  el.querySelectorAll('[data-ref]').forEach(n => { refs[n.dataset.ref] = n; });
+
+  // Pane label
+  refs.paneLabel.textContent = `⌃${paneId + 1}`;
+
+  // Populate agent select
+  populateAgentSelect(refs.select, pane.agentId);
+
+  // Agent select change
+  refs.select.addEventListener('change', () => {
+    assignAgent(paneId, refs.select.value);
+  });
+
+  // Focus on click
+  el.addEventListener('mousedown', (e) => {
+    if (e.target.tagName !== 'SELECT' && e.target.tagName !== 'OPTION') {
+      setFocus(paneId);
+    }
+  });
+
+  // Input focus → set pane focus
+  refs.input.addEventListener('focus', () => setFocus(paneId));
+
+  // Send on Enter
+  refs.input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage(paneId);
+    }
+  });
+
+  // Send button
+  refs.sendBtn.addEventListener('click', () => sendMessage(paneId));
+
+  // Thinking toggle
+  refs.thinkBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    togglePaneThinking(paneId);
+  });
+
+  // Reset session button
+  refs.resetBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    resetPaneSession(paneId);
+  });
+
+  // Refresh/New Chat
+  refs.refreshBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    resetPane(paneId);
+  });
+
+  // Close pane
+  refs.closeBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    clearPane(paneId);
+  });
+
+  // Model dropdown change
+  refs.modelDropdown.addEventListener('change', (e) => {
+    e.stopPropagation();
+    setAgentModel(paneId, e.target.value);
+  });
+
+  // Scroll → follow-mode tracking
+  refs.messages.addEventListener('scroll', () => {
+    const el = refs.messages;
+    const atBottom = (el.scrollHeight - el.scrollTop - el.clientHeight) < SCROLL_THRESHOLD;
+    state.panes[paneId].followMode = atBottom;
+    if (atBottom) {
+      refs.newBar.classList.remove('visible');
+    }
+  });
+
+  // New messages bar click → scroll to bottom
+  refs.newBar.addEventListener('click', () => {
+    scrollToBottom(paneId);
+    state.panes[paneId].followMode = true;
+    refs.newBar.classList.remove('visible');
+  });
+
+  return el;
+}
+
+function populateAgentSelect(selectEl, currentAgentId) {
+  selectEl.innerHTML = '<option value="">— select agent —</option>';
+  const agents = Object.values(state.agents).length
+    ? Object.values(state.agents)
+    : Object.values(FALLBACK_AGENTS);
+
+  agents.sort((a, b) => (a.name || a.agentId).localeCompare(b.name || b.agentId));
+
+  agents.forEach(agent => {
+    const opt = document.createElement('option');
+    opt.value = agent.agentId;
+    const emoji = agent.emoji || '';
+    const dot = stateSymbol(agent.state);
+    opt.textContent = `${emoji} ${agent.name || agent.agentId} ${dot}`;
+    selectEl.appendChild(opt);
+  });
+
+  if (currentAgentId) selectEl.value = currentAgentId;
+}
+
+function populateModelDropdown(selectEl, currentModel) {
+  selectEl.innerHTML = '';
+  MODEL_OPTIONS.forEach(model => {
+    const opt = document.createElement('option');
+    opt.value = model.id;
+    opt.textContent = model.display;
+    selectEl.appendChild(opt);
+  });
+
+  if (currentModel) selectEl.value = currentModel;
+}
+
+function stateSymbol(s) {
+  switch (s) {
+    case 'working': return '●';
+    case 'blocked': case 'waiting': return '◐';
+    case 'error':   return '✕';
+    default:        return '○';
+  }
+}
+
+function stateClass(s) {
+  if (s === 'working') return 'working';
+  if (s === 'blocked' || s === 'waiting') return 'blocked';
+  if (s === 'error') return 'error';
+  return 'idle';
+}
+
+/* ───────── Organization & Model helpers ───────── */
+
+const NOVVI_AGENTS = ['willb', 'jc'];
+const XCOGNIS_AGENTS = ['xavier', 'xena', 'xander', 'xyla', 'ximena', 'xerxes', 'xeno'];
+
+function getAgentOrg(agentId) {
+  if (!agentId) return 'internal';
+  if (NOVVI_AGENTS.includes(agentId)) return 'novvi';
+  if (XCOGNIS_AGENTS.includes(agentId)) return 'xcognis';
+  return 'internal';
+}
+
+// Available models - loaded dynamically from gateway config
+let MODEL_OPTIONS = [];
+
+async function loadModelOptions() {
+  try {
+    const resp = await fetch('/api/synapse/models');
+    if (resp.ok) {
+      const data = await resp.json();
+      MODEL_OPTIONS = (data.models || []).map(m => ({
+        id: m.alias || m.id,
+        display: m.label,
+        alias: m.alias || m.id,
+      }));
+    }
+  } catch (e) {
+    console.warn('[SYNAPSE] Failed to load models:', e);
+    // Fallback
+    MODEL_OPTIONS = [
+      { id: 'sonnet', display: 'Sonnet', alias: 'sonnet' },
+      { id: 'opus', display: 'Opus', alias: 'opus' },
+    ];
+  }
+}
+
+function modelDisplayName(model) {
+  if (!model) return 'Sonnet 4';
+  const m = model.toLowerCase();
+  if (m.includes('opus-4-6') || m.includes('opus-4.6')) return 'Opus 4.6';
+  if (m.includes('opus')) return 'Opus 4.5';
+  if (m.includes('sonnet')) return 'Sonnet 4';
+  if (m.includes('haiku')) return 'Haiku';
+  if (m.includes('gpt-4')) return 'GPT-4';
+  if (m.includes('o1')) return 'o1';
+  if (m.includes('o3')) return 'o3';
+  return model.split('/').pop() || model;
+}
+
+/* ───────── Pane actions (thinking, reset, close, model) ───────── */
+
+function togglePaneThinking(paneId) {
+  const pane = state.panes[paneId];
+  if (!pane || !pane.agentId) return;
+
+  pane.thinking = !pane.thinking;
+  updatePaneHeader(paneId);
+
+  // Send reasoning command to agent
+  const cmd = pane.thinking ? '/reasoning on' : '/reasoning off';
+  sendToAgent(paneId, cmd);
+}
+
+function resetPane(paneId) {
+  const pane = state.panes[paneId];
+  if (!pane) return;
+
+  // Clear messages
+  pane.messages = [];
+  pane.unreadCount = 0;
+  pane.thinking = false;
+
+  // Re-render messages
+  const paneEl = getPaneEl(paneId);
+  if (paneEl) {
+    const msgsEl = paneEl.querySelector('[data-ref="messages"]');
+    if (msgsEl) msgsEl.innerHTML = '';
+    updatePaneHeader(paneId, paneEl);
+  }
+}
+
+function clearPane(paneId) {
+  const pane = state.panes[paneId];
+  if (!pane) return;
+
+  // Unassign agent and clear
+  pane.agentId = null;
+  pane.messages = [];
+  pane.unreadCount = 0;
+  pane.thinking = false;
+  pane.model = null;
+
+  const paneEl = getPaneEl(paneId);
+  if (paneEl) {
+    const msgsEl = paneEl.querySelector('[data-ref="messages"]');
+    if (msgsEl) msgsEl.innerHTML = '';
+    const sel = paneEl.querySelector('[data-ref="select"]');
+    if (sel) sel.value = '';
+    updatePaneHeader(paneId, paneEl);
+  }
+}
+
+function resetPaneSession(paneId) {
+  const pane = state.panes[paneId];
+  if (!pane || !pane.agentId) return;
+
+  // Send reset via WebSocket
+  if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+    state.ws.send(JSON.stringify({
+      type: 'reset',
+      agentId: pane.agentId
+    }));
+  }
+
+  // Clear local state
+  resetPane(paneId);
+}
+
+function setAgentModel(paneId, model) {
+  const pane = state.panes[paneId];
+  if (!pane || !pane.agentId || !model) return;
+
+  // Send model change via WebSocket
+  if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+    state.ws.send(JSON.stringify({
+      type: 'set_model',
+      agentId: pane.agentId,
+      payload: { model }
+    }));
+  }
+}
+
+function sendToAgent(paneId, message) {
+  const pane = state.panes[paneId];
+  if (!pane || !pane.agentId) return;
+
+  // Use WebSocket to send command
+  if (state.synapseWs && state.synapseWs.readyState === WebSocket.OPEN) {
+    const payload = {
+      type: 'send',
+      target: pane.agentId,
+      message: message
+    };
+    state.synapseWs.send(JSON.stringify(payload));
+  }
+}
+
+/* ───────── Pane header updates ───────── */
+
+function updateAllPaneHeaders() {
+  const paneEls = $grid.querySelectorAll('.nx-pane');
+  paneEls.forEach(el => {
+    const id = parseInt(el.dataset.paneId);
+    updatePaneHeader(id, el);
+  });
+}
+
+function updatePaneHeader(paneId, paneEl) {
+  if (!paneEl) paneEl = getPaneEl(paneId);
+  if (!paneEl) return;
+  const pane = state.panes[paneId];
+  if (!pane) return;
+
+  const emoji         = paneEl.querySelector('[data-ref="emoji"]');
+  const dot           = paneEl.querySelector('[data-ref="statusDot"]');
+  const badge         = paneEl.querySelector('[data-ref="badge"]');
+  const sel           = paneEl.querySelector('[data-ref="select"]');
+  const orgTag        = paneEl.querySelector('[data-ref="orgTag"]');
+  const modelDropdown = paneEl.querySelector('[data-ref="modelDropdown"]');
+  const tokenCounter  = paneEl.querySelector('[data-ref="tokenCounter"]');
+  const tokenText     = paneEl.querySelector('[data-ref="tokenText"]');
+  const tokenFill     = paneEl.querySelector('[data-ref="tokenFill"]');
+  const thinkBtn      = paneEl.querySelector('[data-ref="thinkBtn"]');
+  const thinkLabel    = paneEl.querySelector('[data-ref="thinkLabel"]');
+
+  const agent = state.agents[pane.agentId] || FALLBACK_AGENTS[pane.agentId];
+  if (agent) {
+    emoji.textContent = agent.emoji || '';
+    dot.className = 'status-dot ' + stateClass(agent.state);
+
+    // Organization tag and pane border color
+    const org = getAgentOrg(pane.agentId);
+    orgTag.textContent = org.toUpperCase();
+    orgTag.className = 'org-tag ' + org.toLowerCase();
+    orgTag.style.display = '';
+    
+    // Set pane org class for border color
+    paneEl.className = paneEl.className.replace(/org-\w+/g, '');
+    paneEl.classList.add('org-' + org);
+
+    // Model dropdown
+    populateModelDropdown(modelDropdown, pane.model || agent.model || 'sonnet');
+    modelDropdown.style.display = '';
+
+    // Token counter
+    const contextPct = agent.contextPct || 0;
+    const contextMax = agent.contextMax || 200000;
+    const contextUsedK = Math.round(contextPct * contextMax / 1000);
+    const contextMaxK = Math.round(contextMax / 1000);
+    const maxLabel = contextMaxK >= 1000 ? `${(contextMaxK/1000).toFixed(0)}M` : `${contextMaxK}K`;
+    tokenText.textContent = `${contextUsedK}K/${maxLabel}`;
+    tokenFill.style.width = `${Math.min(contextPct * 100, 100)}%`;
+    
+    // Color coding for token usage
+    tokenFill.className = 'token-fill ' + 
+      (contextPct < 0.5 ? 'low' : 
+       contextPct < 0.75 ? 'medium' : 
+       contextPct < 0.9 ? 'high' : 'critical');
+    tokenCounter.style.display = '';
+
+    // Thinking state
+    const thinking = pane.thinking || false;
+    thinkLabel.textContent = thinking ? 'On' : 'Off';
+    thinkBtn.classList.toggle('active', thinking);
+  } else {
+    emoji.textContent = '';
+    dot.className = 'status-dot idle';
+    orgTag.style.display = 'none';
+    modelDropdown.style.display = 'none';
+    tokenCounter.style.display = 'none';
+    thinkLabel.textContent = 'Off';
+    thinkBtn.classList.remove('active');
+    
+    // Remove org class
+    paneEl.className = paneEl.className.replace(/org-\w+/g, '');
+  }
+
+  badge.textContent = pane.unreadCount;
+  if (sel.value !== (pane.agentId || '')) sel.value = pane.agentId || '';
+}
+
+/* ───────── Focus management ───────── */
+
+function setFocus(paneId) {
+  if (paneId === state.focusPane && getPaneEl(paneId)?.classList.contains('focused')) return;
+  state.focusPane = paneId;
+  saveNexusState();
+
+  // Clear unread on newly focused pane
+  const pane = state.panes[paneId];
+  if (pane) {
+    pane.unreadCount = 0;
+  }
+
+  updateFocusVisuals();
+
+  // Focus the input
+  const el = getPaneEl(paneId);
+  if (el) {
+    const input = el.querySelector('[data-ref="input"]');
+    if (input) input.focus();
+  }
+}
+
+function updateFocusVisuals() {
+  const paneEls = $grid.querySelectorAll('.nx-pane');
+  paneEls.forEach(el => {
+    const id = parseInt(el.dataset.paneId);
+    const pane = state.panes[id];
+
+    el.classList.toggle('focused', id === state.focusPane);
+    el.classList.toggle('unread', pane && pane.unreadCount > 0 && id !== state.focusPane);
+
+    const badge = el.querySelector('[data-ref="badge"]');
+    if (badge && pane) badge.textContent = pane.unreadCount;
+  });
+}
+
+/* ───────── Messages rendering ───────── */
+
+function renderMessages(paneId) {
+  const paneEl = getPaneEl(paneId);
+  if (!paneEl) return;
+  const container = paneEl.querySelector('[data-ref="messages"]');
+  const pane = state.panes[paneId];
+  if (!pane || !pane.agentId) {
+    container.innerHTML = `
+      <div class="pane-empty">
+        <span class="empty-icon">◇</span>
+        <span>Select an agent to begin</span>
+      </div>`;
+    return;
+  }
+
+  container.innerHTML = '';
+
+  pane.messages.forEach(msg => {
+    container.appendChild(createMsgEl(msg));
+  });
+
+  // Append streaming text if present
+  if (pane.streamText != null) {
+    const streamMsg = { role: 'assistant', text: pane.streamText, streaming: true };
+    container.appendChild(createMsgEl(streamMsg));
+  }
+
+  if (pane.followMode) {
+    scrollToBottomImmediate(container);
+  }
+}
+
+function appendMessage(paneId, msg) {
+  const paneEl = getPaneEl(paneId);
+  if (!paneEl) return;
+  const container = paneEl.querySelector('[data-ref="messages"]');
+  const pane = state.panes[paneId];
+
+  // Remove streaming element if present
+  const streamEl = container.querySelector('.streaming-cursor');
+  if (streamEl) streamEl.closest('.msg')?.remove();
+
+  container.appendChild(createMsgEl(msg));
+
+  if (pane.followMode) {
+    scrollToBottom(paneId);
+  } else if (paneId !== state.focusPane) {
+    // Show new messages bar
+    const bar = paneEl.querySelector('[data-ref="newBar"]');
+    if (bar) bar.classList.add('visible');
+  }
+}
+
+function updateStreamingText(paneId, text) {
+  const paneEl = getPaneEl(paneId);
+  if (!paneEl) return;
+  const container = paneEl.querySelector('[data-ref="messages"]');
+  const pane = state.panes[paneId];
+
+  let streamEl = container.querySelector('.msg.streaming');
+  if (!streamEl) {
+    streamEl = createMsgEl({ role: 'assistant', text, streaming: true });
+    streamEl.classList.add('streaming');
+    container.appendChild(streamEl);
+  } else {
+    const textEl = streamEl.querySelector('.msg-text');
+    if (textEl) textEl.textContent = text;
+  }
+
+  if (pane.followMode) {
+    scrollToBottomImmediate(container);
+  } else if (paneId !== state.focusPane) {
+    const bar = paneEl.querySelector('[data-ref="newBar"]');
+    if (bar) bar.classList.add('visible');
+  }
+}
+
+function removeStreamingEl(paneId) {
+  const paneEl = getPaneEl(paneId);
+  if (!paneEl) return;
+  const container = paneEl.querySelector('[data-ref="messages"]');
+  const streamEl = container.querySelector('.msg.streaming');
+  if (streamEl) streamEl.remove();
+}
+
+function createMsgEl(msg) {
+  const div = document.createElement('div');
+  div.className = 'msg';
+
+  const roleDiv = document.createElement('div');
+  roleDiv.className = 'msg-role ' + (msg.role || 'assistant');
+  roleDiv.textContent = msg.role === 'user' ? 'You' : (msg.agentName || 'Agent');
+
+  const textDiv = document.createElement('div');
+  textDiv.className = 'msg-text';
+  if (msg.streaming) textDiv.classList.add('streaming-cursor');
+  textDiv.textContent = msg.text || '';
+
+  div.appendChild(roleDiv);
+  div.appendChild(textDiv);
+
+  if (msg.ts) {
+    const tsDiv = document.createElement('div');
+    tsDiv.className = 'msg-ts';
+    tsDiv.textContent = formatTs(msg.ts);
+    div.appendChild(tsDiv);
+  }
+
+  return div;
+}
+
+function formatTs(ts) {
+  try {
+    const d = new Date(ts);
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  } catch { return ''; }
+}
+
+/* ───────── Scroll helpers ───────── */
+
+function scrollToBottom(paneId) {
+  const paneEl = getPaneEl(paneId);
+  if (!paneEl) return;
+  const container = paneEl.querySelector('[data-ref="messages"]');
+  container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+}
+
+function scrollToBottomImmediate(container) {
+  container.scrollTop = container.scrollHeight;
+}
+
+/* ───────── Utility ───────── */
+
+function getPaneEl(paneId) {
+  return $grid.querySelector(`.nx-pane[data-pane-id="${paneId}"]`);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   AGENT MANAGEMENT
+   ═══════════════════════════════════════════════════════════════ */
+
+function assignAgent(paneId, agentId) {
+  const pane = state.panes[paneId];
+  if (!pane) return;
+
+  // Unsubscribe from old agent if it was the only pane with it
+  const oldAgent = pane.agentId;
+  pane.agentId = agentId || null;
+  pane.messages = [];
+  pane.streamText = null;
+  pane.unreadCount = 0;
+  pane.followMode = true;
+
+  if (oldAgent && !state.panes.some(p => p.agentId === oldAgent && p !== pane)) {
+    // Was the last pane subscribed — could unsubscribe, but protocol doesn't require it
+  }
+
+  // Subscribe via WebSocket
+  if (agentId && state.ws && state.ws.readyState === WebSocket.OPEN) {
+    state.ws.send(JSON.stringify({ type: 'subscribe', agentId }));
+  }
+
+  // Update header and messages
+  const paneEl = getPaneEl(paneId);
+  if (paneEl) {
+    updatePaneHeader(paneId, paneEl);
+    renderMessages(paneId);
+  }
+  updateFocusVisuals();
+  saveNexusState();
+}
+
+/* ───────── Persistent State ───────── */
+const NEXUS_STATE_KEY = 'nexus-v2-state';
+
+function saveNexusState() {
+  try {
+    const data = {
+      layout: state.layout ? `${state.layout.cols}x${state.layout.rows}` : null,
+      panes: state.panes.slice(0, state.layout?.count || 0).map(p => p.agentId || null),
+      focusPane: state.focusPane,
+    };
+    localStorage.setItem(NEXUS_STATE_KEY, JSON.stringify(data));
+  } catch (e) { /* quota exceeded, ignore */ }
+}
+
+function loadNexusState() {
+  try {
+    const raw = localStorage.getItem(NEXUS_STATE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (e) { return null; }
+}
+
+function updateAgentRoster(agents) {
+  if (!agents || !Array.isArray(agents)) return;
+  agents.forEach(a => {
+    state.agents[a.agentId] = { ...state.agents[a.agentId], ...a };
+  });
+  updateTopbarAgentCount();
+  refreshAllAgentSelects();
+  updateAllPaneHeaders();
+}
+
+function updateSingleAgent(agentId, data) {
+  state.agents[agentId] = { ...state.agents[agentId], ...data, agentId };
+  updateAllPaneHeaders();
+}
+
+function updateTopbarAgentCount() {
+  const total = Object.keys(state.agents).length;
+  const working = Object.values(state.agents).filter(a => a.state === 'working').length;
+  $agentCount.textContent = `${total} agents` + (working ? ` · ${working} working` : '');
+}
+
+function refreshAllAgentSelects() {
+  const selects = $grid.querySelectorAll('.agent-select');
+  selects.forEach(sel => {
+    const paneId = parseInt(sel.closest('.nx-pane').dataset.paneId);
+    const pane = state.panes[paneId];
+    populateAgentSelect(sel, pane?.agentId);
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   WEBSOCKET
+   ═══════════════════════════════════════════════════════════════ */
+
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const url = `${proto}//${location.host}/api/synapse/ws`;
+
+  setWSStatus('connecting');
+  const ws = new WebSocket(url);
+  state.ws = ws;
+
+  ws.onopen = () => {
+    setWSStatus('connected');
+    state.wsReconnectDelay = 1000;
+
+    // Subscribe to all assigned agents
+    state.panes.forEach(pane => {
+      if (pane.agentId) {
+        ws.send(JSON.stringify({ type: 'subscribe', agentId: pane.agentId }));
+      }
+    });
+
+    // Start ping
+    clearInterval(state.pingInterval);
+    state.pingInterval = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'ping' }));
+      }
+    }, 10000);
+  };
+
+  ws.onmessage = (evt) => {
+    let frame;
+    try { frame = JSON.parse(evt.data); } catch { return; }
+    handleFrame(frame);
+  };
+
+  ws.onclose = () => {
+    setWSStatus('disconnected');
+    clearInterval(state.pingInterval);
+    scheduleReconnect();
+  };
+
+  ws.onerror = () => {
+    setWSStatus('disconnected');
+  };
+}
+
+function scheduleReconnect() {
+  clearTimeout(state.wsReconnectTimer);
+  state.wsReconnectTimer = setTimeout(() => {
+    state.wsReconnectDelay = Math.min(state.wsReconnectDelay * 1.5, 30000);
+    connectWS();
+  }, state.wsReconnectDelay);
+}
+
+function setWSStatus(status) {
+  $wsIndicator.className = 'ws-dot ' + (status === 'connected' ? 'connected' : status === 'connecting' ? 'connecting' : '');
+  $wsLabel.textContent = status === 'connected' ? 'Connected' : status === 'connecting' ? 'Connecting...' : 'Disconnected';
+  $wsIndicator.title = 'WebSocket ' + status;
+
+  // Disable/enable send buttons
+  const btns = $grid.querySelectorAll('[data-ref="sendBtn"]');
+  btns.forEach(b => { b.disabled = status !== 'connected'; });
+}
+
+/* ───────── Frame handler ───────── */
+
+function handleFrame(frame) {
+  const { type, agentId, payload } = frame;
+
+  switch (type) {
+    case 'connected':
+    case 'status_all':
+      if (payload?.agents) {
+        updateAgentRoster(payload.agents);
+        // Auto-assign agents to empty panes on first connect
+        const agentIds = Object.keys(state.agents);
+        const assigned = new Set(state.panes.map(p => p.agentId).filter(Boolean));
+        for (let i = 0; i < state.layout.count; i++) {
+          if (!state.panes[i].agentId) {
+            const next = agentIds.find(a => !assigned.has(a));
+            if (next) {
+              assignAgent(i, next);
+              assigned.add(next);
+            }
+          }
+        }
+      }
+      break;
+
+    case 'status':
+      if (agentId) {
+        updateSingleAgent(agentId, payload || frame);
+      }
+      break;
+
+    case 'subscribed': {
+      // Load history
+      const targetPanes = findPanesForAgent(agentId);
+      if (payload?.history) {
+        targetPanes.forEach(paneId => {
+          const pane = state.panes[paneId];
+          pane.messages = payload.history.map(m => ({
+            role: m.role,
+            text: m.text,
+            ts: m.ts,
+            agentName: getAgentName(agentId),
+          }));
+          pane.followMode = true;
+          renderMessages(paneId);
+        });
+      }
+      break;
+    }
+
+    case 'chunk': {
+      const targetPanes = findPanesForAgent(agentId);
+      const text = payload?.text || '';
+      targetPanes.forEach(paneId => {
+        const pane = state.panes[paneId];
+        pane.streamText = text;
+        updateStreamingText(paneId, text);
+
+        // Unread tracking for non-focused panes
+        if (paneId !== state.focusPane) {
+          if (!pane._chunkCounted) {
+            pane.unreadCount++;
+            pane._chunkCounted = true;
+            updateFocusVisuals();
+          }
+        }
+      });
+      break;
+    }
+
+    case 'message': {
+      const targetPanes = findPanesForAgent(agentId);
+      const msg = {
+        role: payload?.role || 'assistant',
+        text: payload?.text || '',
+        ts: payload?.ts,
+        agentName: getAgentName(agentId),
+      };
+      targetPanes.forEach(paneId => {
+        const pane = state.panes[paneId];
+        // Clear streaming state
+        pane.streamText = null;
+        pane._chunkCounted = false;
+        removeStreamingEl(paneId);
+        // Add complete message
+        pane.messages.push(msg);
+        appendMessage(paneId, msg);
+
+        // Unread
+        if (paneId !== state.focusPane) {
+          pane.unreadCount++;
+          updateFocusVisuals();
+        }
+      });
+      break;
+    }
+
+    case 'ack': {
+      // Agent acknowledged, now working
+      if (agentId && state.agents[agentId]) {
+        state.agents[agentId].state = 'working';
+        updateAllPaneHeaders();
+      }
+      break;
+    }
+
+    case 'history': {
+      const targetPanes = findPanesForAgent(agentId);
+      if (payload?.messages) {
+        targetPanes.forEach(paneId => {
+          const pane = state.panes[paneId];
+          pane.messages = payload.messages.map(m => ({
+            role: m.role,
+            text: m.text,
+            ts: m.ts,
+            agentName: getAgentName(agentId),
+          }));
+          renderMessages(paneId);
+        });
+      }
+      break;
+    }
+
+    case 'error': {
+      const targetPanes = findPanesForAgent(agentId);
+      const errText = payload?.message || payload?.error || 'Unknown error';
+      targetPanes.forEach(paneId => {
+        const pane = state.panes[paneId];
+        pane.streamText = null;
+        pane._chunkCounted = false;
+        removeStreamingEl(paneId);
+        pane.messages.push({ role: 'assistant', text: `⚠ Error: ${errText}`, ts: new Date().toISOString() });
+        renderMessages(paneId);
+        const paneEl = getPaneEl(paneId);
+        if (paneEl) paneEl.classList.add('error');
+        // Clear error class after 5s
+        setTimeout(() => { paneEl?.classList.remove('error'); }, 5000);
+      });
+      break;
+    }
+
+    case 'pong':
+      // Connection health — no action needed
+      break;
+  }
+}
+
+/* ───────── Send message ───────── */
+
+function sendMessage(paneId) {
+  const pane = state.panes[paneId];
+  if (!pane || !pane.agentId) return;
+  const paneEl = getPaneEl(paneId);
+  if (!paneEl) return;
+  const input = paneEl.querySelector('[data-ref="input"]');
+  const text = input.value.trim();
+  if (!text) return;
+
+  // Add to local messages
+  const msg = { role: 'user', text, ts: new Date().toISOString(), agentName: 'You' };
+  pane.messages.push(msg);
+  appendMessage(paneId, msg);
+
+  // Send via WebSocket
+  if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+    state.ws.send(JSON.stringify({
+      type: 'message',
+      agentId: pane.agentId,
+      payload: { text },
+    }));
+  }
+
+  input.value = '';
+  pane.followMode = true;
+  scrollToBottom(paneId);
+}
+
+/* ───────── Helpers ───────── */
+
+function findPanesForAgent(agentId) {
+  const results = [];
+  for (let i = 0; i < state.layout.count; i++) {
+    if (state.panes[i]?.agentId === agentId) results.push(i);
+  }
+  return results;
+}
+
+function getAgentName(agentId) {
+  const a = state.agents[agentId] || FALLBACK_AGENTS[agentId];
+  return a ? (a.name || agentId) : agentId;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   KEYBOARD SHORTCUTS
+   ═══════════════════════════════════════════════════════════════ */
+
+document.addEventListener('keydown', (e) => {
+  // Ctrl+1 through Ctrl+6 → focus pane
+  if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
+    const n = parseInt(e.key);
+    if (n >= 1 && n <= 6 && n <= state.layout.count) {
+      e.preventDefault();
+      setFocus(n - 1);
+    }
+  }
+});
+
+/* ═══════════════════════════════════════════════════════════════
+   INIT
+   ═══════════════════════════════════════════════════════════════ */
+
+async function init() {
+  // Seed agent registry with fallbacks
+  Object.values(FALLBACK_AGENTS).forEach(a => {
+    if (!state.agents[a.agentId]) {
+      state.agents[a.agentId] = { ...a, state: 'idle', contextPct: 0 };
+    }
+  });
+  updateTopbarAgentCount();
+
+  // Populate layout selector based on viewport
+  populateLayoutSelector();
+
+  // Restore saved state or use defaults
+  const saved = loadNexusState();
+  if (saved && saved.layout) {
+    const [c, r] = saved.layout.split('x').map(Number);
+    if (c && r) {
+      $layoutSel.value = saved.layout;
+      applyLayout(c, r);
+      // Restore pane agent assignments (skip auto-assign)
+      if (saved.panes && Array.isArray(saved.panes)) {
+        saved.panes.forEach((agentId, i) => {
+          if (agentId && i < state.panes.length) {
+            assignAgent(i, agentId);
+          }
+        });
+      }
+    } else {
+      applyLayout(1, 1);
+    }
+  } else {
+    // Apply default layout from selector
+    const val = $layoutSel.value;
+    if (val) {
+      const [c, r] = val.split('x').map(Number);
+      applyLayout(c, r);
+    } else {
+      applyLayout(1, 1);
+    }
+  }
+
+  setFocus(saved?.focusPane || 0);
+
+  // Layout selector change
+  $layoutSel.addEventListener('change', () => {
+    const [c, r] = $layoutSel.value.split('x').map(Number);
+    applyLayout(c, r);
+  });
+
+  // Recalculate available layouts on resize
+  let resizeTimer;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      populateLayoutSelector();
+    }, 250);
+  });
+
+  // Load models from gateway config, then connect WebSocket
+  await loadModelOptions();
+  connectWS();
+}
+
+init();
+
+})();
+// Agent tools dropdown close on click outside
+document.addEventListener('click', e => {
+  const menu = document.getElementById('agentToolsMenu');
+  const btn = document.getElementById('agentToolsBtn');
+  if (menu && btn && !btn.contains(e.target) && !menu.contains(e.target)) {
+    menu.classList.remove('show');
+  }
+});
+</script>
+</body>
+</html>

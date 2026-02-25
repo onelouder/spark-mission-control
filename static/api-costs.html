@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Cost Tracking Dashboard</title>
+    <link rel="stylesheet" href="ide-noir.css">
+    <style>
+        .dashboard {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: var(--space-6);
+        }
+        
+        .header {
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border-default);
+            padding: 0 var(--space-6);
+            margin-bottom: var(--space-8);
+            background: var(--bg-surface);
+        }
+        
+        .metric-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: var(--space-6);
+            margin-bottom: var(--space-8);
+        }
+        
+        .metric-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            padding: var(--space-6);
+        }
+        
+        .metric-label {
+            font-size: var(--text-sm);
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: var(--space-2);
+        }
+        
+        .metric-value {
+            font-size: var(--text-xl);
+            color: var(--text-primary);
+            font-weight: 500;
+            margin-bottom: var(--space-3);
+        }
+        
+        .metric-change {
+            font-size: var(--text-xs);
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+        }
+        
+        .metric-change.positive {
+            color: var(--success);
+        }
+        
+        .metric-change.negative {
+            color: var(--danger);
+        }
+        
+        .tables-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: var(--space-8);
+            margin-bottom: var(--space-8);
+        }
+        
+        .table-section {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            padding: var(--space-6);
+        }
+        
+        .table-title {
+            font-size: var(--text-heading);
+            color: var(--text-primary);
+            margin-bottom: var(--space-6);
+            font-weight: 500;
+        }
+        
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: var(--text-base);
+        }
+        
+        .data-table th {
+            text-align: left;
+            padding: var(--space-4);
+            background: var(--bg-elevated);
+            border-bottom: 1px solid var(--border-default);
+            color: var(--text-secondary);
+            font-weight: 500;
+            text-transform: uppercase;
+            font-size: var(--text-xs);
+            letter-spacing: 0.08em;
+        }
+        
+        .data-table td {
+            padding: var(--space-4);
+            border-bottom: 1px solid var(--border-subtle);
+            color: var(--text-primary);
+        }
+        
+        .data-table tr:hover td {
+            background: var(--bg-hover);
+        }
+        
+        .status-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--space-2);
+            padding: var(--space-1) var(--space-3);
+            border-radius: var(--radius-sm);
+            font-size: var(--text-xs);
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        
+        .status-indicator.active {
+            background: var(--success-dim);
+            color: var(--success);
+        }
+        
+        .status-indicator.mock {
+            background: var(--warning-dim);
+            color: var(--warning);
+        }
+        
+        .status-indicator.error {
+            background: var(--danger-dim);
+            color: var(--danger);
+        }
+        
+        .cost-amount {
+            font-family: var(--font-mono);
+            color: var(--accent);
+        }
+        
+        .token-count {
+            font-family: var(--font-mono);
+            color: var(--text-secondary);
+        }
+        
+        .data-notice {
+            background: var(--warning-dim);
+            border: 1px solid var(--warning);
+            border-radius: var(--radius-lg);
+            padding: var(--space-6);
+            margin-bottom: var(--space-8);
+        }
+        
+        .notice-title {
+            color: var(--warning);
+            font-weight: 500;
+            margin-bottom: var(--space-3);
+        }
+        
+        .notice-text {
+            color: var(--text-primary);
+            font-size: var(--text-base);
+            line-height: 1.4;
+        }
+        
+        .notice-list {
+            list-style: none;
+            padding: 0;
+            margin: var(--space-3) 0 0 0;
+        }
+        
+        .notice-list li {
+            position: relative;
+            padding-left: var(--space-6);
+            margin-bottom: var(--space-2);
+        }
+        
+        .notice-list li::before {
+            content: "•";
+            position: absolute;
+            left: 0;
+            color: var(--warning);
+        }
+        
+        .full-width {
+            grid-column: 1 / -1;
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <h1>API Cost Tracking Dashboard</h1>
+        <div class="status-indicator mock">Mock Data</div>
+    </header>
+
+    <main class="dashboard">
+        <div class="data-notice">
+            <div class="notice-title">Data Source Status</div>
+            <div class="notice-text">
+                This dashboard currently displays mock data. To implement real-time API cost tracking, the following data sources would be needed:
+                <ul class="notice-list">
+                    <li>Anthropic API usage logs with token counts and cost calculations</li>
+                    <li>OpenAI API usage data from OpenAI dashboard or API</li>
+                    <li>Groq API metrics from https://console.groq.com/dashboard/metrics</li>
+                    <li>Moltbot log parser to extract actual token usage from agent interactions</li>
+                    <li>Database to store historical usage data for trend analysis</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="metric-cards">
+            <div class="metric-card">
+                <div class="metric-label">Total Monthly Cost</div>
+                <div class="metric-value cost-amount">$127.43</div>
+                <div class="metric-change positive">+$23.12 vs last month</div>
+            </div>
+            
+            <div class="metric-card">
+                <div class="metric-label">Tokens This Month</div>
+                <div class="metric-value token-count">2,847,392</div>
+                <div class="metric-change positive">+425,183 vs last month</div>
+            </div>
+            
+            <div class="metric-card">
+                <div class="metric-label">Requests This Month</div>
+                <div class="metric-value">1,847</div>
+                <div class="metric-change negative">-127 vs last month</div>
+            </div>
+            
+            <div class="metric-card">
+                <div class="metric-label">Average Cost per 1K Tokens</div>
+                <div class="metric-value cost-amount">$0.045</div>
+                <div class="metric-change positive">-$0.003 vs last month</div>
+            </div>
+        </div>
+
+        <div class="tables-container">
+            <div class="table-section">
+                <h2 class="table-title">Costs by Provider</h2>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Provider</th>
+                            <th>Model</th>
+                            <th>Tokens</th>
+                            <th>Cost</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Anthropic</td>
+                            <td>claude-sonnet-4</td>
+                            <td class="token-count">1,847,392</td>
+                            <td class="cost-amount">$83.13</td>
+                        </tr>
+                        <tr>
+                            <td>Anthropic</td>
+                            <td>claude-opus-4</td>
+                            <td class="token-count">234,567</td>
+                            <td class="cost-amount">$35.18</td>
+                        </tr>
+                        <tr>
+                            <td>OpenAI</td>
+                            <td>gpt-4o</td>
+                            <td class="token-count">487,291</td>
+                            <td class="cost-amount">$7.31</td>
+                        </tr>
+                        <tr>
+                            <td>OpenAI</td>
+                            <td>text-embedding-3-small</td>
+                            <td class="token-count">278,142</td>
+                            <td class="cost-amount">$1.39</td>
+                        </tr>
+                        <tr>
+                            <td>Groq</td>
+                            <td>llama-3.1-70b</td>
+                            <td class="token-count">156,892</td>
+                            <td class="cost-amount">$0.42</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="table-section">
+                <h2 class="table-title">Daily Usage (Last 7 Days)</h2>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Requests</th>
+                            <th>Tokens</th>
+                            <th>Cost</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Feb 4</td>
+                            <td>147</td>
+                            <td class="token-count">287,491</td>
+                            <td class="cost-amount">$12.94</td>
+                        </tr>
+                        <tr>
+                            <td>Feb 3</td>
+                            <td>203</td>
+                            <td class="token-count">394,726</td>
+                            <td class="cost-amount">$17.76</td>
+                        </tr>
+                        <tr>
+                            <td>Feb 2</td>
+                            <td>189</td>
+                            <td class="token-count">356,214</td>
+                            <td class="cost-amount">$16.03</td>
+                        </tr>
+                        <tr>
+                            <td>Feb 1</td>
+                            <td>167</td>
+                            <td class="token-count">298,847</td>
+                            <td class="cost-amount">$13.45</td>
+                        </tr>
+                        <tr>
+                            <td>Jan 31</td>
+                            <td>221</td>
+                            <td class="token-count">441,923</td>
+                            <td class="cost-amount">$19.89</td>
+                        </tr>
+                        <tr>
+                            <td>Jan 30</td>
+                            <td>198</td>
+                            <td class="token-count">378,592</td>
+                            <td class="cost-amount">$17.04</td>
+                        </tr>
+                        <tr>
+                            <td>Jan 29</td>
+                            <td>156</td>
+                            <td class="token-count">267,834</td>
+                            <td class="cost-amount">$12.05</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="table-section full-width">
+            <h2 class="table-title">Implementation Requirements</h2>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Component</th>
+                        <th>Status</th>
+                        <th>Data Source</th>
+                        <th>Notes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Anthropic Usage</td>
+                        <td><span class="status-indicator error">Missing</span></td>
+                        <td>Anthropic API logs</td>
+                        <td>No built-in usage tracking API available</td>
+                    </tr>
+                    <tr>
+                        <td>OpenAI Usage</td>
+                        <td><span class="status-indicator error">Missing</span></td>
+                        <td>OpenAI Usage API</td>
+                        <td>Could use OpenAI's usage endpoint</td>
+                    </tr>
+                    <tr>
+                        <td>Groq Usage</td>
+                        <td><span class="status-indicator error">Missing</span></td>
+                        <td>Groq Dashboard API</td>
+                        <td>Would need to parse dashboard or find API</td>
+                    </tr>
+                    <tr>
+                        <td>Moltbot Log Parser</td>
+                        <td><span class="status-indicator mock">Partial</span></td>
+                        <td>/tmp/moltbot/*.log</td>
+                        <td>Found logs but no detailed token tracking</td>
+                    </tr>
+                    <tr>
+                        <td>Cost Calculator</td>
+                        <td><span class="status-indicator active">Ready</span></td>
+                        <td>Pricing tables</td>
+                        <td>Can implement with known pricing</td>
+                    </tr>
+                    <tr>
+                        <td>Historical Storage</td>
+                        <td><span class="status-indicator error">Missing</span></td>
+                        <td>Database</td>
+                        <td>Need SQLite/PostgreSQL for trends</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </main>
+
+    <script>
+        // Mock data refresh simulation
+        function updateTimestamp() {
+            const now = new Date().toLocaleString();
+            console.log(`Dashboard refreshed at ${now}`);
+        }
+
+        // Simulate periodic data refresh
+        setInterval(updateTimestamp, 60000);
+        
+        // Add interactive table sorting
+        document.querySelectorAll('.data-table th').forEach(header => {
+            header.style.cursor = 'pointer';
+            header.addEventListener('click', () => {
+                console.log(`Sorting by ${header.textContent}`);
+                // Actual sorting would be implemented here
+            });
+        });
+        
+        console.log('API Cost Tracking Dashboard loaded with mock data');
+        console.log('To implement real tracking:');
+        console.log('1. Set up API usage logging for each provider');
+        console.log('2. Parse Moltbot logs for token usage');
+        console.log('3. Implement cost calculation engine');
+        console.log('4. Add historical data storage');
+        console.log('5. Create real-time data refresh');
+    </script>
+</body>
+</html>

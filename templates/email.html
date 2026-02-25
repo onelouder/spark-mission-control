@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="/static/favicon.png">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <title>Mission Control — Email</title>
+    <link rel="stylesheet" href="/static/ide-noir.css">
+    <link rel="stylesheet" href="/static/mission-control.css">
+    <style>
+        /* Email-specific styles */
+        /* ============================================
+           CSS Variables - "The Void" Palette
+           ============================================ */
+        :root {
+            --bg-void: #0b0f14;
+            --bg-panel: #0f1620;
+            --bg-surface: #131c28;
+            --bg-elevated: #1a2636;
+            
+            --text-primary: rgba(255, 255, 255, 0.92);
+            --text-secondary: rgba(255, 255, 255, 0.68);
+            --text-tertiary: rgba(255, 255, 255, 0.52);
+            --text-disabled: rgba(255, 255, 255, 0.35);
+            
+            --accent: #4ea1ff;
+            --success: #35d07f;
+            --warning: #f0b429;
+            --danger: #ff5c5c;
+            --info: #6ea8ff;
+            
+            --border-subtle: rgba(255, 255, 255, 0.08);
+            --border-default: rgba(255, 255, 255, 0.12);
+            --border-strong: rgba(255, 255, 255, 0.20);
+            
+            --duration-fast: 100ms;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+            background-color: var(--bg-void);
+            color: var(--text-primary);
+            line-height: 1.4;
+            font-size: 12px;
+        }
+
+        .font-mono {
+            font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+        }
+
+        /* ============================================
+           Navigation
+           ============================================ */
+        .nav-bar {
+            background-color: var(--bg-panel);
+            border-bottom: 1px solid var(--border-default);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .nav-container {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 16px;
+            height: 48px;
+        }
+
+        .nav-left {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .nav-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+            letter-spacing: -0.02em;
+        }
+
+        .nav-tabs {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .nav-tab {
+            padding: 6px 12px;
+            border-radius: 2px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 11px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            transition: all var(--duration-fast);
+            border: 1px solid transparent;
+        }
+
+        .nav-tab:hover {
+            background-color: var(--bg-surface);
+            color: var(--text-primary);
+        }
+
+        .nav-tab.active {
+            background-color: rgba(78, 161, 255, 0.15);
+            color: var(--accent);
+            border-color: rgba(78, 161, 255, 0.3);
+        }
+
+        .nav-right {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        /* ============================================
+           Buttons
+           ============================================ */
+        .btn {
+            height: 32px;
+            padding: 0 12px;
+            border-radius: 2px;
+            border: 1px solid var(--border-default);
+            background: transparent;
+            color: var(--text-secondary);
+            font-size: 11px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all var(--duration-fast);
+            font-family: inherit;
+        }
+
+        .btn:hover {
+            background: var(--bg-surface);
+            color: var(--text-primary);
+        }
+
+        .btn-primary {
+            background: rgba(78, 161, 255, 0.15);
+            color: var(--accent);
+            border-color: rgba(78, 161, 255, 0.5);
+        }
+
+        .btn-primary:hover {
+            background: rgba(78, 161, 255, 0.25);
+            border-color: var(--accent);
+        }
+
+        /* ============================================
+           Stats Bar
+           ============================================ */
+        .stats-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 24px;
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--border-subtle);
+            background: var(--bg-panel);
+        }
+
+        .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+        }
+
+        .stat-label {
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .stat-value {
+            font-weight: 600;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+        }
+
+        .stat-value.red { color: var(--danger); }
+        .stat-value.orange { color: var(--warning); }
+        .stat-value.blue { color: var(--accent); }
+        .stat-value.green { color: var(--success); }
+        .stat-value.gray { color: var(--text-tertiary); }
+
+        /* ============================================
+           Email Sections
+           ============================================ */
+        main {
+            padding: 12px;
+        }
+
+        .email-section {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-default);
+            border-radius: 2px;
+            margin-bottom: 8px;
+            overflow: hidden;
+        }
+
+        .section-header {
+            padding: 8px 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: 600;
+            border-left: 3px solid;
+            background: var(--bg-surface);
+        }
+
+        .section-title {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+        }
+
+        .section-count {
+            font-size: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 2px 8px;
+            border-radius: 2px;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-tertiary);
+        }
+
+        /* Section colors via left border */
+        .section-header.needs-response { border-left-color: var(--danger); }
+        .section-header.action-items { border-left-color: var(--warning); }
+        .section-header.meetings { border-left-color: var(--accent); }
+        .section-header.fyi { border-left-color: var(--success); }
+        .section-header.filtered { 
+            border-left-color: var(--text-disabled); 
+            cursor: pointer;
+        }
+        .section-header.filtered:hover { 
+            background: var(--bg-elevated);
+        }
+
+        .email-list {
+            padding: 6px;
+        }
+
+        .email-list.hidden {
+            display: none;
+        }
+
+        .email-list:empty::after {
+            content: 'No emails';
+            display: block;
+            padding: 12px;
+            text-align: center;
+            color: var(--text-tertiary);
+            font-size: 11px;
+        }
+
+        /* ============================================
+           Email Cards
+           ============================================ */
+        .email-card {
+            background: var(--bg-void);
+            border: 1px solid var(--border-subtle);
+            border-radius: 2px;
+            padding: 10px 12px;
+            margin-bottom: 4px;
+            transition: all var(--duration-fast);
+        }
+
+        .email-card:hover {
+            border-color: var(--border-strong);
+            background: var(--bg-surface);
+        }
+
+        .email-card.filtered {
+            opacity: 0.6;
+        }
+
+        .email-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 6px;
+        }
+
+        .email-sender {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .sender-name {
+            font-weight: 500;
+            font-size: 12px;
+            color: var(--text-primary);
+        }
+
+        .contact-tier-badge {
+            font-size: 9px;
+            padding: 1px 5px;
+            border-radius: 2px;
+            background: var(--bg-surface);
+            color: var(--text-tertiary);
+            font-family: 'JetBrains Mono', monospace;
+            text-transform: uppercase;
+        }
+
+        .contact-tier-badge.t1 { 
+            background: rgba(255, 92, 92, 0.2);
+            color: var(--danger);
+        }
+        .contact-tier-badge.t2 { 
+            background: rgba(240, 180, 41, 0.2);
+            color: var(--warning);
+        }
+
+        .email-meta {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 10px;
+            color: var(--text-tertiary);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .urgency-indicator {
+            font-size: 10px;
+        }
+
+        .email-subject {
+            font-size: 12px;
+            font-weight: 500;
+            margin-bottom: 4px;
+            line-height: 1.4;
+            color: var(--text-primary);
+        }
+
+        .email-summary {
+            font-size: 11px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            margin-bottom: 8px;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .email-action {
+            font-size: 11px;
+            padding: 6px 8px;
+            background: rgba(240, 180, 41, 0.1);
+            border-left: 2px solid var(--warning);
+            border-radius: 0 2px 2px 0;
+            margin-bottom: 8px;
+        }
+
+        .action-text {
+            color: var(--text-primary);
+        }
+
+        .deadline-text {
+            color: var(--warning);
+            margin-left: 6px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .email-footer {
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        .email-actions {
+            display: flex;
+            gap: 4px;
+            opacity: 0;
+            transition: opacity var(--duration-fast);
+        }
+
+        .email-card:hover .email-actions {
+            opacity: 1;
+        }
+
+        .action-btn {
+            padding: 4px 8px;
+            border-radius: 2px;
+            border: 1px solid var(--border-default);
+            background: transparent;
+            color: var(--text-secondary);
+            font-size: 10px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            font-family: inherit;
+            transition: all var(--duration-fast);
+        }
+
+        .action-btn:hover {
+            border-color: var(--accent);
+            color: var(--text-primary);
+            background: var(--bg-surface);
+        }
+
+        .filter-reason {
+            font-size: 10px;
+            color: var(--text-tertiary);
+            font-style: italic;
+            margin-top: 4px;
+        }
+
+        /* ============================================
+           Loading Overlay
+           ============================================ */
+        .loading-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(11, 15, 20, 0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 200;
+        }
+
+        .loading-overlay.hidden {
+            display: none;
+        }
+
+        .loading-content {
+            background: var(--bg-elevated);
+            padding: 20px 28px;
+            border-radius: 4px;
+            text-align: center;
+            border: 1px solid var(--border-default);
+        }
+
+        .loading-spinner {
+            width: 24px;
+            height: 24px;
+            border: 2px solid var(--border-default);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        .loading-content p {
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* ============================================
+           Scrollbar
+           ============================================ */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-void);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-default);
+            border-radius: 3px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--border-strong);
+        }
+
+        /* ============================================
+           Keyboard Shortcuts Bar
+           ============================================ */
+        .shortcuts-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            padding: 6px 16px;
+            background: var(--bg-surface);
+            border-bottom: 1px solid var(--border-subtle);
+            font-size: 10px;
+            color: var(--text-tertiary);
+        }
+
+        .shortcut {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        kbd {
+            display: inline-block;
+            padding: 2px 5px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-default);
+            border-radius: 3px;
+            color: var(--text-secondary);
+            min-width: 18px;
+            text-align: center;
+        }
+
+        /* Selected email card */
+        .email-card.selected {
+            border-color: var(--accent);
+            background: var(--bg-elevated);
+            box-shadow: 0 0 0 1px var(--accent);
+        }
+
+        .email-card.selected .email-actions {
+            opacity: 1;
+        }
+
+        /* ============================================
+           Source Toggle
+           ============================================ */
+        .source-toggle {
+            display: flex;
+            gap: 2px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 2px;
+        }
+        .source-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s;
+            letter-spacing: 0.3px;
+        }
+        .source-btn:hover { color: var(--text-primary); background: var(--bg-hover, rgba(255,255,255,0.05)); }
+        .source-btn.active { background: var(--accent-color, #6366f1); color: #fff; }
+        .source-badge {
+            display: inline-block;
+            font-size: 9px;
+            font-weight: 600;
+            padding: 1px 5px;
+            border-radius: 3px;
+            margin-left: 4px;
+            letter-spacing: 0.4px;
+            vertical-align: middle;
+        }
+        .source-badge.gmail { background: rgba(234,67,53,0.2); color: #ea4335; }
+        .source-badge.novvi { background: rgba(16,185,129,0.2); color: #10b981; }
+        .gmail-card .email-snippet {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin: 4px 0 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .gmail-card .unread-dot {
+            display: inline-block;
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background: #6366f1;
+            margin-right: 5px;
+            vertical-align: middle;
+            flex-shrink: 0;
+        }
+
+        /* ============================================
+           Draft Modal
+           ============================================ */
+        .modal-overlay {
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.6);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 1000;
+        }
+        .modal-box {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            width: min(600px, 92vw);
+            padding: 20px;
+            display: flex; flex-direction: column; gap: 14px;
+        }
+        .modal-header { display: flex; justify-content: space-between; align-items: flex-start; }
+        .modal-title  { font-weight: 600; font-size: 15px; }
+        .modal-subtitle { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+        .modal-close  { background: none; border: none; color: var(--text-secondary); font-size: 16px; cursor: pointer; padding: 2px 6px; }
+        .modal-close:hover { color: var(--text-primary); }
+        .draft-spinner { color: var(--text-secondary); font-size: 13px; padding: 12px 0; }
+        .dot-anim { display: inline-block; animation: dots 1.2s steps(3, end) infinite; }
+        @keyframes dots { 0%,33%{content:'.'} 34%,66%{content:'..'} 67%,100%{content:'...'} }
+        .draft-textarea {
+            width: 100%; box-sizing: border-box;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-family: inherit; font-size: 13px; line-height: 1.6;
+            padding: 10px; resize: vertical;
+        }
+        .draft-textarea:focus { outline: none; border-color: var(--accent-color, #6366f1); }
+        .modal-footer { display: flex; gap: 8px; }
+
+        /* ============================================
+           Utility
+           ============================================ */
+        .text-muted { color: var(--text-tertiary); }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <nav class="nav-bar">
+        <div class="nav-container">
+            <div class="nav-left">
+                <span class="nav-title">Mission Control</span>
+                <div class="nav-tabs">
+                    <a href="/" class="nav-tab">Kanban</a>
+                    <a href="/briefing" class="nav-tab">Briefing</a>
+                    <a href="/email" class="nav-tab active">Email</a>
+                    <a href="/queue" class="nav-tab">Queue</a>
+                    <a href="/crm" class="nav-tab">CRM</a>
+                    <a href="/synapse" class="nav-tab">Synapse</a>
+                    <a href="/activity" class="nav-tab">Activity</a>
+                    <a href="/rbot" class="nav-tab">Research</a>
+                    <a href="/atlas" class="nav-tab">Atlas</a>
+                    <a href="https://jarvis.jwells.net/activity" class="nav-tab" target="_blank">Jarvis</a>
+                </div>
+            </div>
+            <div class="nav-right">
+                <div class="source-toggle" id="source-toggle">
+                    <button class="source-btn active" data-source="novvi" title="Novvi (Office 365)">Novvi</button>
+                    <button class="source-btn" data-source="gmail" title="Gmail (Personal)">Gmail</button>
+                    <button class="source-btn" data-source="both" title="Both accounts">Both</button>
+                </div>
+                <button id="sync-btn" class="btn btn-primary">Process Emails</button>
+                <span id="last-sync" class="text-muted font-mono" style="font-size: 10px;">—</span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Keyboard Shortcuts Legend -->
+    <div class="shortcuts-bar">
+        <span class="shortcut"><kbd>j</kbd><kbd>k</kbd> navigate</span>
+        <span class="shortcut"><kbd>o</kbd> open</span>
+        <span class="shortcut"><kbd>t</kbd> → task</span>
+        <span class="shortcut"><kbd>a</kbd> archive</span>
+        <span class="shortcut"><kbd>s</kbd> snooze</span>
+        <span class="shortcut"><kbd>x</kbd> spam</span>
+        <span class="shortcut"><kbd>d</kbd> delete</span>
+        <span class="shortcut"><kbd>r</kbd> refresh</span>
+    </div>
+
+    <!-- Stats Header -->
+    <section class="stats-bar">
+        <div class="stat-item">
+            <span class="stat-label">Needs Reply</span>
+            <span id="stat-needs-response" class="stat-value red">0</span>
+        </div>
+        <div class="stat-item">
+            <span class="stat-label">Action Items</span>
+            <span id="stat-action-items" class="stat-value orange">0</span>
+        </div>
+        <div class="stat-item">
+            <span class="stat-label">Meetings</span>
+            <span id="stat-meetings" class="stat-value blue">0</span>
+        </div>
+        <div class="stat-item">
+            <span class="stat-label">FYI</span>
+            <span id="stat-fyi" class="stat-value green">0</span>
+        </div>
+        <div class="stat-item">
+            <span class="stat-label">Filtered</span>
+            <span id="stat-filtered" class="stat-value gray">0</span>
+        </div>
+    </section>
+
+    <!-- Main Email Dashboard -->
+    <main>
+        <!-- Needs Response Section -->
+        <section class="email-section">
+            <div class="section-header needs-response">
+                <h2 class="section-title">Needs Response</h2>
+                <span id="count-needs-response" class="section-count">0</span>
+            </div>
+            <div id="list-needs-response" class="email-list"></div>
+        </section>
+
+        <!-- Action Items Section -->
+        <section class="email-section">
+            <div class="section-header action-items">
+                <h2 class="section-title">Action Items</h2>
+                <span id="count-action-items" class="section-count">0</span>
+            </div>
+            <div id="list-action-items" class="email-list"></div>
+        </section>
+
+        <!-- Meeting Requests Section -->
+        <section class="email-section">
+            <div class="section-header meetings">
+                <h2 class="section-title">Meeting Requests</h2>
+                <span id="count-meetings" class="section-count">0</span>
+            </div>
+            <div id="list-meetings" class="email-list"></div>
+        </section>
+
+        <!-- FYI Section -->
+        <section class="email-section">
+            <div class="section-header fyi">
+                <h2 class="section-title">Read / FYI</h2>
+                <span id="count-fyi" class="section-count">0</span>
+            </div>
+            <div id="list-fyi" class="email-list"></div>
+        </section>
+
+        <!-- Gmail Section (shown when source=gmail or source=both) -->
+        <section class="email-section hidden" id="gmail-section">
+            <div class="section-header" style="border-left-color: #ea4335;">
+                <h2 class="section-title">Gmail <span class="source-badge gmail">GMAIL</span></h2>
+                <span id="count-gmail" class="section-count">0</span>
+            </div>
+            <div id="list-gmail" class="email-list"></div>
+        </section>
+
+        <!-- Filtered Section (Collapsible) -->
+        <section class="email-section">
+            <div id="filtered-toggle" class="section-header filtered">
+                <h2 class="section-title">Filtered</h2>
+                <span id="count-filtered" class="section-count">0</span>
+            </div>
+            <div id="list-filtered" class="email-list hidden"></div>
+        </section>
+    </main>
+
+    <!-- Email Card Template -->
+    <template id="email-card-template">
+        <div class="email-card">
+            <div class="email-header">
+                <div class="email-sender">
+                    <span class="sender-name"></span>
+                    <span class="contact-tier-badge"></span>
+                </div>
+                <div class="email-meta">
+                    <span class="urgency-indicator"></span>
+                    <span class="email-time"></span>
+                </div>
+            </div>
+            <h3 class="email-subject"></h3>
+            <p class="email-summary"></p>
+            <div class="email-action" style="display: none;">
+                <span class="action-text"></span>
+                <span class="deadline-text"></span>
+            </div>
+            <div class="email-footer">
+                <div class="email-actions">
+                    <a class="action-btn outlook-btn" target="_blank">Open</a>
+                    <button class="action-btn draft-btn" title="Draft a reply with AI">✍️ Draft</button>
+                    <button class="action-btn task-btn">→ Task</button>
+                    <button class="action-btn archive-btn">Archive</button>
+                    <button class="action-btn snooze-btn">Snooze</button>
+                    <button class="action-btn spam-btn" title="Block this sender">🚫 Spam</button>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <!-- Filtered Email Card Template -->
+    <template id="filtered-email-template">
+        <div class="email-card filtered">
+            <div class="email-header">
+                <div class="email-sender">
+                    <span class="sender-name"></span>
+                </div>
+                <div class="email-meta">
+                    <span class="email-time"></span>
+                </div>
+            </div>
+            <h3 class="email-subject"></h3>
+            <div class="filter-reason">
+                <span class="filter-text"></span>
+            </div>
+        </div>
+    </template>
+
+    <!-- Draft Modal -->
+    <div id="draft-modal" class="modal-overlay hidden">
+        <div class="modal-box">
+            <div class="modal-header">
+                <div>
+                    <div class="modal-title">✍️ Draft Reply</div>
+                    <div id="draft-to" class="modal-subtitle"></div>
+                </div>
+                <button class="modal-close" id="draft-close">✕</button>
+            </div>
+            <div id="draft-spinner" class="draft-spinner">Generating draft<span class="dot-anim">...</span></div>
+            <textarea id="draft-body" class="draft-textarea hidden" rows="10" spellcheck="true"></textarea>
+            <div id="draft-actions" class="modal-footer hidden">
+                <button class="action-btn" id="draft-copy">Copy</button>
+                <a id="draft-open" class="action-btn outlook-btn" target="_blank">Open in Outlook</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay hidden">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <p>Processing emails...</p>
+        </div>
+    </div>
+
+    <script src="/static/email.js"></script>
+</body>
+</html>

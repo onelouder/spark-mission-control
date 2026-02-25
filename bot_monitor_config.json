@@ -1,0 +1,62 @@
+{
+  "monitoring_thresholds": {
+    "message_volume_spike_factor": 3.0,
+    "message_volume_window_minutes": 30,
+    "rate_limit_warning_pct": 80.0,
+    "rate_limit_critical_pct": 95.0,
+    "auth_failure_max_per_hour": 10,
+    "suspicious_ip_threshold": 5,
+    "ip_geolocation_timeout": 5,
+    "alert_cooldown_minutes": 15,
+    "stats_retention_hours": 24
+  },
+  "trusted_ip_ranges": [
+    "127.0.0.0/8",
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "::1/128"
+  ],
+  "monitoring_settings": {
+    "check_interval_seconds": 30,
+    "enable_auto_resolution": false,
+    "log_level": "INFO",
+    "enable_email_alerts": false,
+    "enable_webhook_alerts": false
+  },
+  "integration": {
+    "rate_limit_proxy_url": "http://localhost:18790",
+    "mission_control_url": "http://localhost:3000",
+    "openclaw_gateway_url": "http://localhost:18789"
+  },
+  "alert_categories": {
+    "volume": {
+      "enabled": true,
+      "severity_mapping": {
+        "high_spike": "warning",
+        "extreme_spike": "critical"
+      }
+    },
+    "rate_limit": {
+      "enabled": true,
+      "severity_mapping": {
+        "approaching_limit": "warning", 
+        "at_limit": "critical"
+      }
+    },
+    "auth": {
+      "enabled": true,
+      "severity_mapping": {
+        "high_failure_rate": "warning",
+        "auth_attack": "critical"
+      }
+    },
+    "suspicious_ip": {
+      "enabled": true,
+      "severity_mapping": {
+        "unknown_ip_activity": "warning",
+        "ip_attack": "critical"
+      }
+    }
+  }
+}

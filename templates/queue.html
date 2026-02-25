@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="/static/favicon.png">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <title>Mission Control — Agent Queue</title>
+    <link rel="stylesheet" href="/static/ide-noir.css">
+    <link rel="stylesheet" href="/static/mission-control.css">
+    <style>
+        /* Agent Status Bar */
+        .agent-status-bar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            background: #1e3a5f;
+            border-bottom: 2px solid #4a9eff;
+            min-height: 44px;
+        }
+        .agent-status-label {
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #fff;
+        }
+        .agent-status-list {
+            display: flex;
+            gap: 8px;
+            flex: 1;
+            overflow-x: auto;
+        }
+        .agent-chip {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            background: #252525;
+            border: 1px solid #444;
+            border-radius: 16px;
+            font-size: 12px;
+            white-space: nowrap;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            color: #e0e0e0;
+        }
+        .agent-chip:hover {
+            background: #333;
+            border-color: #4a9eff;
+        }
+        .agent-chip.active {
+            border-color: #4aff4a;
+        }
+        .agent-chip.idle {
+            border-color: #666;
+        }
+        .agent-chip .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #666;
+        }
+        .agent-chip.active .status-dot {
+            background: #4aff4a;
+        }
+        .agent-chip.busy .status-dot {
+            background: #ffaa00;
+            animation: pulse 1.5s infinite;
+        }
+        .agent-chip .context-pct {
+            font-size: 10px;
+            color: #888;
+            font-family: monospace;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        .btn-sm {
+            padding: 4px 8px;
+            font-size: 12px;
+        }
+        .btn-warning {
+            background: var(--warning);
+            color: var(--bg-primary);
+            border-color: var(--warning);
+        }
+        .btn-warning:hover {
+            background: #cc8800;
+        }
+        .btn-warning:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .queue-badge.agent {
+            background: #1e3a5f;
+            border: 1px solid #4a9eff;
+            color: #8cc4ff;
+        }
+        
+        /* Queue + Chat Layout */
+        .queue-layout {
+            display: flex;
+            height: calc(100vh - 48px); /* subtract nav height */
+            overflow: hidden;
+        }
+        .queue-main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            min-width: 0;
+        }
+        .queue-main .queue-board {
+            flex: 1;
+            overflow-x: auto;
+        }
+        
+        /* Chat Panel */
+        .chat-panel {
+            width: 380px;
+            min-width: 300px;
+            max-width: 50vw;
+            border-left: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            background: var(--bg-secondary);
+        }
+        .chat-panel.hidden {
+            display: none;
+        }
+        .chat-panel-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-tertiary);
+        }
+        .chat-agent-select {
+            flex: 1;
+            padding: 6px 10px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-primary);
+            font-size: 13px;
+        }
+        .chat-iframe {
+            flex: 1;
+            border: none;
+            background: var(--bg-primary);
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="nav-bar">
+        <div class="nav-container">
+            <div class="nav-left">
+                <span class="nav-title">Mission Control</span>
+                <div class="nav-tabs">
+                    <a href="/" class="nav-tab">Kanban</a>
+                    <a href="/briefing" class="nav-tab">Briefing</a>
+                    <a href="/email" class="nav-tab">Email</a>
+                    <a href="/queue" class="nav-tab active">Agent Queue</a>
+                    <a href="/crm" class="nav-tab">CRM</a>
+                    <a href="/cron" class="nav-tab">Cron Jobs</a>
+                    <a href="/synapse" class="nav-tab">Synapse</a>
+                    <a href="/activity" class="nav-tab">Activity</a>
+                    <a href="/rbot" class="nav-tab">Research</a>
+                    <a href="/atlas" class="nav-tab">Atlas</a>
+                    <a href="https://jarvis.jwells.net/activity" class="nav-tab" target="_blank">Jarvis</a>
+                </div>
+            </div>
+            <div class="nav-right">
+                <span class="queue-stats font-mono" id="queue-stats">—</span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Layout: Queue + Chat -->
+    <div class="queue-layout">
+        <!-- Left: Queue Content -->
+        <div class="queue-main">
+            <!-- Agent Status Bar -->
+            <div class="agent-status-bar" id="agent-status-bar">
+                <div class="agent-status-label">Agents</div>
+                <div class="agent-status-list" id="agent-status-list">
+                    <!-- Populated by JS -->
+                </div>
+                <button class="btn btn-sm" id="refresh-agents-btn" title="Refresh agent status">↻</button>
+                <button class="btn btn-sm" id="cron-panel-btn" title="Open cron jobs panel">⏰</button>
+                <button class="btn btn-sm" id="toggle-chat-btn" title="Toggle chat panel">💬</button>
+            </div>
+
+            <!-- Page Header -->
+            <div class="page-header">
+                <h2>Agent Work Queue</h2>
+                <div class="quick-add-form">
+                    <input type="text" id="quick-add-input" class="quick-add-input" placeholder="Quick add task...">
+                    <select id="quick-add-column" class="quick-add-select">
+                        <option value="urgent">Urgent</option>
+                        <option value="active">Active</option>
+                        <option value="queued" selected>Queued</option>
+                        <option value="ideas">Ideas</option>
+                    </select>
+                    <button id="quick-add-btn" class="btn btn-primary">Add</button>
+                </div>
+            </div>
+
+            <!-- Queue Board -->
+            <div class="queue-board">
+        <!-- Urgent Column -->
+        <div class="queue-column" data-column="urgent">
+            <div class="queue-header" style="border-left-color: var(--danger);">
+                <span class="queue-title">Urgent</span>
+                <span class="queue-count font-mono" data-count="urgent">0</span>
+            </div>
+            <div class="queue-content" id="col-urgent"></div>
+        </div>
+
+        <!-- Active Column -->
+        <div class="queue-column" data-column="active">
+            <div class="queue-header" style="border-left-color: var(--warning);">
+                <span class="queue-title">Active</span>
+                <span class="queue-count font-mono" data-count="active">0</span>
+            </div>
+            <div class="queue-content" id="col-active"></div>
+        </div>
+
+        <!-- Review Column -->
+        <div class="queue-column" data-column="review">
+            <div class="queue-header" style="border-left-color: var(--success);">
+                <span class="queue-title">Review</span>
+                <span class="queue-count font-mono" data-count="review">0</span>
+            </div>
+            <div class="queue-content" id="col-review"></div>
+        </div>
+
+        <!-- Queued Column -->
+        <div class="queue-column" data-column="queued">
+            <div class="queue-header" style="border-left-color: var(--accent);">
+                <span class="queue-title">Queued</span>
+                <span class="queue-count font-mono" data-count="queued">0</span>
+            </div>
+            <div class="queue-content" id="col-queued"></div>
+        </div>
+
+        <!-- Ideas Column -->
+        <div class="queue-column" data-column="ideas">
+            <div class="queue-header" style="border-left-color: #6f42c1;">
+                <span class="queue-title">Ideas</span>
+                <span class="queue-count font-mono" data-count="ideas">0</span>
+            </div>
+            <div class="queue-content" id="col-ideas"></div>
+        </div>
+
+        <!-- Done Column -->
+        <div class="queue-column" data-column="done">
+            <div class="queue-header" style="border-left-color: #35d07f;">
+                <span class="queue-title">✓ Done</span>
+                <span class="queue-count font-mono" data-count="done">0</span>
+                <button class="btn btn-sm archive-all-btn" id="archive-all-btn" title="Archive all done tasks">Archive All</button>
+            </div>
+            <div class="queue-content" id="col-done"></div>
+        </div>
+
+        <!-- Archive Column (collapsed) -->
+        <div class="queue-column archive-column" data-column="archive" id="archive-column">
+            <div class="queue-header archive-header" style="border-left-color: #666;" onclick="toggleArchive()">
+                <span class="queue-title">📦 Archive</span>
+                <span class="queue-count font-mono" data-count="archive">0</span>
+                <span class="archive-toggle" id="archive-toggle">▶</span>
+            </div>
+            <div class="queue-content archive-content hidden" id="col-archive"></div>
+        </div>
+            </div><!-- /queue-board -->
+        </div><!-- /queue-main -->
+
+        <!-- Right: Chat Panel (collapsible) -->
+        <div class="chat-panel hidden" id="chat-panel">
+            <div class="chat-panel-header">
+                <select id="chat-agent-select" class="chat-agent-select">
+                    <!-- Populated dynamically from /api/agents -->
+                </select>
+                <button class="btn btn-sm" id="close-chat-btn" title="Close chat">✕</button>
+            </div>
+            <iframe id="chat-iframe" class="chat-iframe" src=""></iframe>
+        </div>
+    </div><!-- /queue-layout -->
+
+    <!-- Item Detail Modal -->
+    <div id="item-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 500px;">
+            <h3 class="modal-title">Task Details</h3>
+            <input type="hidden" id="modal-item-id">
+            <div>
+                <label>Title</label>
+                <input type="text" id="modal-item-title" class="modal-input">
+            </div>
+            <div>
+                <label>Description</label>
+                <textarea id="modal-item-description" class="modal-input" rows="2"></textarea>
+            </div>
+            <div style="display: flex; gap: 12px;">
+                <div style="flex: 1;">
+                    <label>Column</label>
+                    <select id="modal-item-column" class="modal-input">
+                        <option value="urgent">Urgent</option>
+                        <option value="active">Active</option>
+                        <option value="review">Review</option>
+                        <option value="queued">Queued</option>
+                        <option value="ideas">Ideas</option>
+                        <option value="done">Done</option>
+                        <option value="archive">Archive</option>
+                    </select>
+                </div>
+                <div style="flex: 1;">
+                    <label>Complexity</label>
+                    <select id="modal-item-complexity" class="modal-input">
+                        <option value="quick">Quick</option>
+                        <option value="medium">Medium</option>
+                        <option value="deep">Deep</option>
+                    </select>
+                </div>
+                <div style="width: 80px;">
+                    <label>Priority</label>
+                    <input type="number" id="modal-item-priority" class="modal-input" min="0" max="100">
+                </div>
+            </div>
+            <div>
+                <label>Doc Path</label>
+                <div style="display: flex; gap: 8px;">
+                    <input type="text" id="modal-item-doc-path" class="modal-input" style="margin-bottom: 0;" placeholder="plans/project.md">
+                    <button class="btn" onclick="openDocInEditor()" style="white-space: nowrap;">Open in Helix</button>
+                </div>
+            </div>
+            <div>
+                <label>Notes</label>
+                <textarea id="modal-item-notes" class="modal-input" rows="3"></textarea>
+            </div>
+            <div>
+                <label>Assign to Agent</label>
+                <div style="display: flex; gap: 8px;">
+                    <select id="modal-item-agent" class="modal-input" style="margin-bottom: 0; flex: 1;">
+                        <option value="">-- Auto-route --</option>
+                        <!-- Populated dynamically from /api/agents -->
+                    </select>
+                    <button class="btn btn-warning" id="dispatch-btn" onclick="dispatchToAgent()">Dispatch</button>
+                </div>
+            </div>
+            <div id="session-info" class="hidden">
+                <label>Agent Session</label>
+                <div class="session-status-box">
+                    <span id="session-status-text"></span>
+                </div>
+            </div>
+            <div class="modal-actions" style="justify-content: space-between;">
+                <button class="btn btn-danger" onclick="deleteCurrentItem()">Delete</button>
+                <div style="display: flex; gap: 8px;">
+                    <button class="btn" onclick="closeModal()">Cancel</button>
+                    <button class="btn btn-primary" onclick="saveCurrentItem()">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container"></div>
+
+    <script src="/static/queue.js?v=8"></script>
+</body>
+</html>
