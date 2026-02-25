@@ -23,6 +23,56 @@ function setupEventListeners() {
         if (e.key === 'Enter') quickAdd();
     });
 
+    // Inline add - show form
+    document.querySelectorAll('.add-task-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const col = e.target.dataset.column;
+            e.target.classList.add('hidden');
+            document.querySelector(`.add-task-form[data-column="${col}"]`).classList.remove('hidden');
+            document.querySelector(`.add-task-input[data-column="${col}"]`).focus();
+        });
+    });
+
+    // Inline add - submit
+    document.querySelectorAll('.add-task-submit').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const col = e.target.dataset.column;
+            const input = document.querySelector(`.add-task-input[data-column="${col}"]`);
+            const title = input.value.trim();
+            if (title) {
+                createItem({ title, column: col });
+                input.value = '';
+            }
+            // Hide form, show button
+            document.querySelector(`.add-task-form[data-column="${col}"]`).classList.add('hidden');
+            document.querySelector(`.add-task-btn[data-column="${col}"]`).classList.remove('hidden');
+        });
+    });
+
+    // Inline add - cancel
+    document.querySelectorAll('.add-task-cancel').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const col = e.target.dataset.column;
+            document.querySelector(`.add-task-input[data-column="${col}"]`).value = '';
+            document.querySelector(`.add-task-form[data-column="${col}"]`).classList.add('hidden');
+            document.querySelector(`.add-task-btn[data-column="${col}"]`).classList.remove('hidden');
+        });
+    });
+
+    // Inline add - Enter key submits
+    document.querySelectorAll('.add-task-input').forEach(input => {
+        input.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                const col = e.target.dataset.column;
+                document.querySelector(`.add-task-submit[data-column="${col}"]`).click();
+            }
+            if (e.key === 'Escape') {
+                const col = e.target.dataset.column;
+                document.querySelector(`.add-task-cancel[data-column="${col}"]`).click();
+            }
+        });
+    });
+
     // Drag and drop on content areas
     document.querySelectorAll('.queue-content').forEach(col => {
         col.addEventListener('dragover', handleDragOver);

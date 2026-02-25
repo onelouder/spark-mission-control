@@ -153,6 +153,47 @@
             border: none;
             background: var(--bg-primary);
         }
+
+        /* Trello-style inline add */
+        .column-add-task {
+            padding: 8px;
+            border-top: 1px solid var(--border-subtle);
+        }
+        .add-task-btn {
+            width: 100%;
+            padding: 8px;
+            background: transparent;
+            border: 1px dashed var(--border);
+            border-radius: 4px;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .add-task-btn:hover {
+            background: var(--elevated);
+            border-color: var(--accent);
+            color: var(--text);
+        }
+        .add-task-form {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .add-task-form.hidden {
+            display: none;
+        }
+        .add-task-input {
+            width: 100%;
+            padding: 8px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text);
+        }
+        .add-task-actions {
+            display: flex;
+            gap: 8px;
+        }
     </style>
 </head>
 <body>
@@ -220,6 +261,16 @@
                 <span class="queue-count font-mono" data-count="urgent">0</span>
             </div>
             <div class="queue-content" id="col-urgent"></div>
+            <div class="column-add-task">
+                <button class="add-task-btn" data-column="urgent">+ Add task</button>
+                <div class="add-task-form hidden" data-column="urgent">
+                    <input type="text" class="add-task-input" placeholder="Task title..." data-column="urgent">
+                    <div class="add-task-actions">
+                        <button class="btn btn-sm btn-primary add-task-submit" data-column="urgent">Add</button>
+                        <button class="btn btn-sm add-task-cancel" data-column="urgent">✕</button>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Active Column -->
@@ -229,6 +280,16 @@
                 <span class="queue-count font-mono" data-count="active">0</span>
             </div>
             <div class="queue-content" id="col-active"></div>
+            <div class="column-add-task">
+                <button class="add-task-btn" data-column="active">+ Add task</button>
+                <div class="add-task-form hidden" data-column="active">
+                    <input type="text" class="add-task-input" placeholder="Task title..." data-column="active">
+                    <div class="add-task-actions">
+                        <button class="btn btn-sm btn-primary add-task-submit" data-column="active">Add</button>
+                        <button class="btn btn-sm add-task-cancel" data-column="active">✕</button>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Review Column -->
@@ -238,6 +299,16 @@
                 <span class="queue-count font-mono" data-count="review">0</span>
             </div>
             <div class="queue-content" id="col-review"></div>
+            <div class="column-add-task">
+                <button class="add-task-btn" data-column="review">+ Add task</button>
+                <div class="add-task-form hidden" data-column="review">
+                    <input type="text" class="add-task-input" placeholder="Task title..." data-column="review">
+                    <div class="add-task-actions">
+                        <button class="btn btn-sm btn-primary add-task-submit" data-column="review">Add</button>
+                        <button class="btn btn-sm add-task-cancel" data-column="review">✕</button>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Queued Column -->
@@ -247,6 +318,16 @@
                 <span class="queue-count font-mono" data-count="queued">0</span>
             </div>
             <div class="queue-content" id="col-queued"></div>
+            <div class="column-add-task">
+                <button class="add-task-btn" data-column="queued">+ Add task</button>
+                <div class="add-task-form hidden" data-column="queued">
+                    <input type="text" class="add-task-input" placeholder="Task title..." data-column="queued">
+                    <div class="add-task-actions">
+                        <button class="btn btn-sm btn-primary add-task-submit" data-column="queued">Add</button>
+                        <button class="btn btn-sm add-task-cancel" data-column="queued">✕</button>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Ideas Column -->
@@ -256,6 +337,16 @@
                 <span class="queue-count font-mono" data-count="ideas">0</span>
             </div>
             <div class="queue-content" id="col-ideas"></div>
+            <div class="column-add-task">
+                <button class="add-task-btn" data-column="ideas">+ Add task</button>
+                <div class="add-task-form hidden" data-column="ideas">
+                    <input type="text" class="add-task-input" placeholder="Task title..." data-column="ideas">
+                    <div class="add-task-actions">
+                        <button class="btn btn-sm btn-primary add-task-submit" data-column="ideas">Add</button>
+                        <button class="btn btn-sm add-task-cancel" data-column="ideas">✕</button>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Done Column -->
@@ -266,6 +357,16 @@
                 <button class="btn btn-sm archive-all-btn" id="archive-all-btn" title="Archive all done tasks">Archive All</button>
             </div>
             <div class="queue-content" id="col-done"></div>
+            <div class="column-add-task">
+                <button class="add-task-btn" data-column="done">+ Add task</button>
+                <div class="add-task-form hidden" data-column="done">
+                    <input type="text" class="add-task-input" placeholder="Task title..." data-column="done">
+                    <div class="add-task-actions">
+                        <button class="btn btn-sm btn-primary add-task-submit" data-column="done">Add</button>
+                        <button class="btn btn-sm add-task-cancel" data-column="done">✕</button>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Archive Column (collapsed) -->
