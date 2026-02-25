@@ -1100,20 +1100,20 @@ function updatePaneHeader(paneId, paneEl) {
     populateModelDropdown(modelDropdown, pane.model || agent.model || 'sonnet');
     modelDropdown.style.display = '';
 
-    // Token counter
+    // Token counter (contextPct is 0-100 percentage from backend)
     const contextPct = agent.contextPct || 0;
     const contextMax = agent.contextMax || 200000;
-    const contextUsedK = Math.round(contextPct * contextMax / 1000);
+    const contextUsedK = Math.round(contextPct / 100 * contextMax / 1000);
     const contextMaxK = Math.round(contextMax / 1000);
     const maxLabel = contextMaxK >= 1000 ? `${(contextMaxK/1000).toFixed(0)}M` : `${contextMaxK}K`;
     tokenText.textContent = `${contextUsedK}K/${maxLabel}`;
-    tokenFill.style.width = `${Math.min(contextPct * 100, 100)}%`;
+    tokenFill.style.width = `${Math.min(contextPct, 100)}%`;
     
-    // Color coding for token usage
+    // Color coding for token usage (thresholds are percentages)
     tokenFill.className = 'token-fill ' + 
-      (contextPct < 0.5 ? 'low' : 
-       contextPct < 0.75 ? 'medium' : 
-       contextPct < 0.9 ? 'high' : 'critical');
+      (contextPct < 50 ? 'low' : 
+       contextPct < 75 ? 'medium' : 
+       contextPct < 90 ? 'high' : 'critical');
     tokenCounter.style.display = '';
 
     // Thinking state
