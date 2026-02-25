@@ -1386,8 +1386,10 @@
                             updatePaneState(agent.agentId, agent.state);
                         });
                         renderFleet();
-                        // Only initialize panes ONCE when agents first load, not on every status update
-                        if (document.getElementById('multiView').classList.contains('active') && !window._panesInitialized) {
+                        // Initialize panes on first load, and recover if they initialized before agents were available.
+                        const multiViewActive = document.getElementById('multiView').classList.contains('active');
+                        const panesEmpty = paneAgents.every(a => !a);
+                        if (multiViewActive && (!window._panesInitialized || panesEmpty)) {
                             loadModelOptions().then(() => initializeMultiPanes());
                             window._panesInitialized = true;
                         }
@@ -1521,6 +1523,24 @@
                 case 'pong':
                     handlePong();
                     break;
+
+                case 'reset':
+                    if (frame.agentId) {
+                        const agentName = (agents[frame.agentId] && agents[frame.agentId].name) || frame.agentId;
+                        if (!agents[frame.agentId]) {
+                            agents[frame.agentId] = { agentId: frame.agentId };
+                        }
+                        agents[frame.agentId].state = 'idle';
+                        agents[frame.agentId].task = null;
+                        setAgentTyping(frame.agentId, false);
+                        updatePaneState(frame.agentId, 'idle');
+                        if (focusedAgent === frame.agentId) {
+                            updateChatContext(agents[frame.agentId]);
+                        }
+                        renderFleet();
+                        showToast(`✨ New chat started for ${agentName}`, 'success');
+                    }
+                    break;
                     
                 case 'ack':
                     // Message acknowledged - agent is now processing
@@ -1621,8 +1641,8 @@
         function updateChatContext(agent) {
             if (!agent) return;
             
-            // Token count - assume 200k max for now, calculate from contextPct
-            const maxTokens = agent.model === 'opus' ? 200000 : 200000;
+            // Token count from backend-reported context window.
+            const maxTokens = agent.contextMax || 200000;
             const currentTokens = Math.round((agent.contextPct || 0) * maxTokens / 100);
             const tokenEl = document.getElementById('chatTokenCount');
             const dotEl = document.getElementById('chatStateDot');
@@ -2523,7 +2543,7 @@
             if (lastPingTime) {
                 const latency = Math.round(performance.now() - lastPingTime);
                 latencyHistory.push(latency);
-                if (latencyHistory.length > 5) latencyHistory.shift();
+                if (latencyHistory.length > 10) latencyHistory.shift();
                 updateConnectionQuality(latency);
                 lastPingTime = null;
             }

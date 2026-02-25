@@ -504,7 +504,7 @@ class AgentRouter:
 
     @staticmethod
     def _load_models_from_config():
-        """Load valid models and aliases dynamically from gateway config."""
+        """Load valid models, aliases, and display names dynamically from gateway config."""
         try:
             config_path = os.path.expanduser("~/.openclaw/openclaw.json")
             with open(config_path, 'r') as f:
@@ -513,6 +513,7 @@ class AgentRouter:
             valid = set()
             aliases = {}
             full_names = {}
+            display_names = {}
             for model_id, info in models_cfg.items():
                 alias = info.get("alias", "")
                 # model_id is already the full qualified name (e.g. "anthropic/claude-opus-4-6", "google/gemini-3-pro-preview")
@@ -527,23 +528,24 @@ class AgentRouter:
                 full_names[short] = model_id
                 aliases[model_id] = model_id
                 aliases[short] = model_id
+                display_names[model_id] = alias or short
                 if alias:
                     valid.add(alias)
                     full_names[alias] = model_id
                     aliases[alias] = model_id
-            return valid, full_names, aliases
+            return valid, full_names, aliases, display_names
         except Exception:
             # Fallback if config unreadable
-            return {"opus", "sonnet"}, {}, {}
+            return {"opus", "sonnet"}, {}, {}, {}
 
     @property
     def VALID_MODELS(self):
-        valid, _, _ = self._load_models_from_config()
+        valid, _, _, _ = self._load_models_from_config()
         return valid
 
     @property
     def MODEL_FULL_NAMES(self):
-        _, full_names, _ = self._load_models_from_config()
+        _, full_names, _, _ = self._load_models_from_config()
         return full_names
 
     def _get_full_model_name(self, model: str) -> str:
@@ -557,8 +559,13 @@ class AgentRouter:
 
     @property
     def MODEL_ALIASES(self):
-        _, _, aliases = self._load_models_from_config()
+        _, _, aliases, _ = self._load_models_from_config()
         return aliases
+
+    @property
+    def MODEL_DISPLAY_NAMES(self):
+        _, _, _, display_names = self._load_models_from_config()
+        return display_names
 
     async def set_agent_model(self, agent_id: str, model: str) -> dict:
         """Set model override for an agent — persists to gateway config + active session."""
@@ -590,24 +597,16 @@ class AgentRouter:
             logger.error(f"Failed to persist model to config for {agent_id}: {e}")
             # Continue — session override still useful even if config write fails
 
-        # 2. Apply to active session via sessions.status RPC
+        # 2. Apply to active session via sessions.configure RPC
         session_key = f"agent:{agent_id}:main"
         try:
-            result = await self.gateway._request("sessions.status", {
+            result = await self.gateway._request("sessions.configure", {
                 "sessionKey": session_key,
                 "model": full_model,
             })
             logger.info(f"Set gateway session model for {agent_id} to {full_model}: {result.get('ok', False)}")
         except Exception as e:
             logger.error(f"Failed to set gateway session model for {agent_id}: {e}")
-
-        # 3. Restart gateway to pick up config change (SIGUSR1 for graceful reload)
-        try:
-            import subprocess
-            subprocess.run(["pkill", "-USR1", "-f", "openclaw.*gateway"], capture_output=True, timeout=5)
-            logger.info(f"Sent SIGUSR1 to gateway for config reload")
-        except Exception as e:
-            logger.warning(f"Could not send SIGUSR1 to gateway: {e}")
 
         self._model_overrides[agent_id] = model
         self._save_model_overrides()
@@ -925,6 +924,8 @@ class AgentRouter:
             if key:
                 session_map[key] = sess
 
+        _, _, _, model_display_names = self._load_models_from_config()
+
         for agent_id, agent in self.agents.items():
             sess = session_map.get(agent.session_key)
             if sess:
@@ -946,21 +947,19 @@ class AgentRouter:
                 total_tokens = sess.get("totalTokens", 0)
                 agent.context_max = context_tokens
                 if context_tokens > 0:
-                    agent.context_pct = round(total_tokens / context_tokens, 4)
+                    agent.context_pct = round(total_tokens / context_tokens * 100, 2)
                 else:
                     agent.context_pct = 0
                 if sess.get("task"):
                     agent.task = sess["task"]
                 if sess.get("model"):
-                    # Clean model name for display
+                    # Model display name from gateway config alias map
                     raw_model = sess["model"]
-                    DISPLAY_NAMES = {
-                        "anthropic/claude-opus-4-6": "opus-4-6",
-                        "anthropic/claude-opus-4-5": "opus-4-5",
-                        "anthropic/claude-sonnet-4-20250514": "sonnet",
-                        "anthropic/claude-sonnet-4-5-20250514": "sonnet-4-5",
-                    }
-                    agent.model = DISPLAY_NAMES.get(raw_model, raw_model.split("/")[-1] if "/" in raw_model else raw_model)
+                    display_name = model_display_names.get(raw_model)
+                    if display_name:
+                        agent.model = display_name
+                    else:
+                        agent.model = raw_model.split("/")[-1] if "/" in raw_model else raw_model
                 # Apply local model override if set
                 if agent_id in self._model_overrides:
                     agent.model = self._model_overrides[agent_id]
