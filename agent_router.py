@@ -16,6 +16,7 @@ import asyncio
 import json
 import os
 import logging
+import ssl
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
@@ -26,15 +27,31 @@ import websockets
 from websockets.exceptions import ConnectionClosed
 from websockets.protocol import State as WsState
 
+from openclaw_runtime import get_openclaw_config_path
+from synapse_models import explain_model_unavailability, get_model_catalog
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 # Configuration
-GATEWAY_WS_URL = os.environ.get("MOLTBOT_GATEWAY_WS_URL", "ws://localhost:18789")
+GATEWAY_WS_URL = os.environ.get("MOLTBOT_GATEWAY_WS_URL", "ws://127.0.0.1:18789")
 GATEWAY_TOKEN = os.environ.get("MOLTBOT_TOKEN", "1eba89d56887b8dd1845e1d0898935f8ad378ffc28dd556c")
+GATEWAY_CLIENT_ID = os.environ.get("MOLTBOT_GATEWAY_CLIENT_ID", "openclaw-control-ui")
+GATEWAY_CLIENT_MODE = os.environ.get("MOLTBOT_GATEWAY_CLIENT_MODE", "ui")
+GATEWAY_ORIGIN = os.environ.get("MOLTBOT_GATEWAY_ORIGIN", "http://127.0.0.1:18789")
 STATUS_POLL_INTERVAL = 5.0  # seconds
 RECONNECT_MAX_DELAY = 30.0  # seconds
+REQUESTED_GATEWAY_SCOPES = ["operator.read", "operator.write", "operator.admin"]
+
+CAPABILITY_METHODS = {
+    "chatHistory": "chat.history",
+    "chatSend": "chat.send",
+    "chatAbort": "chat.abort",
+    "sessionsList": "sessions.list",
+    "sessionsReset": "sessions.reset",
+    "sessionsPatch": "sessions.patch",
+}
 
 # Agent constellation - maps agent IDs to their session keys
 # Organization definitions with colors
@@ -52,6 +69,7 @@ AGENT_REGISTRY = {
     "peter": {"name": "Peter", "emoji": "📊", "model": "sonnet", "org": "internal", "sessionKey": "agent:peter:main"},
     "watson": {"name": "Dr. Watson", "emoji": "🩺", "model": "sonnet", "org": "internal", "sessionKey": "agent:watson:main"},
     "elon": {"name": "ELon", "emoji": "🚀", "model": "sonnet", "org": "internal", "sessionKey": "agent:elon:main"},
+    "elon-lite": {"name": "ELon (Lite)", "emoji": "🚀", "model": "gemma", "org": "internal", "sessionKey": "agent:elon-lite:main"},
     "dewey": {"name": "Dewey", "emoji": "📚", "model": "sonnet", "org": "internal", "sessionKey": "agent:dewey:main"},
     "ares": {"name": "Ares", "emoji": "🛡️", "model": "sonnet", "org": "internal", "sessionKey": "agent:ares:main"},
     # Novvi agents
@@ -67,6 +85,8 @@ AGENT_REGISTRY = {
     "xeno": {"name": "Xeno", "emoji": "⚔️", "model": "sonnet", "org": "xcognis", "sessionKey": "agent:xeno:main"},
     # Real Estate
     "todd": {"name": "Todd", "emoji": "🏠", "model": "sonnet", "org": "internal", "sessionKey": "agent:todd:main"},
+    # Education
+    "donald": {"name": "Donald", "emoji": "🦉", "model": "sonnet", "org": "internal", "sessionKey": "agent:donald:main"},
 }
 
 
@@ -119,6 +139,32 @@ class Subscription:
     message_agents: Set[str] = field(default_factory=set)  # Multiple agents for multi-chat
 
 
+class GatewayRPCError(RuntimeError):
+    """Structured RPC failure for capability-aware routing."""
+
+    def __init__(self, method: str, error: dict):
+        self.method = method
+        self.code = str(error.get("code", ""))
+        self.message = str(error.get("message", error or "unknown error"))
+        self.details = error.get("details") or {}
+        super().__init__(f"Gateway RPC {method} failed: {self.message}")
+
+    @property
+    def lower_message(self) -> str:
+        return self.message.lower()
+
+    def is_missing_scope(self) -> bool:
+        return "missing scope" in self.lower_message
+
+    def is_auth_issue(self) -> bool:
+        auth_codes = {"AUTH_TOKEN_MISMATCH", "AUTH_DEVICE_TOKEN_MISMATCH", "PAIRING_REQUIRED"}
+        return self.code in auth_codes or "unauthorized" in self.lower_message
+
+    def is_not_found(self) -> bool:
+        not_found_codes = {"NOT_FOUND", "SESSION_NOT_FOUND"}
+        return self.code in not_found_codes or "not found" in self.lower_message
+
+
 # ---------------------------------------------------------------------------
 # GatewayClient — single persistent WebSocket to Moltbot Gateway
 # ---------------------------------------------------------------------------
@@ -138,10 +184,18 @@ class GatewayClient:
         self.ws = None
         self._pending: Dict[str, asyncio.Future] = {}  # req id (str) -> future
         self._event_handlers: Dict[str, List[Callable]] = {}
+        self._status_handlers: List[Callable] = []
         self._listen_task: Optional[asyncio.Task] = None
         self._reconnect_task: Optional[asyncio.Task] = None
         self._connected = asyncio.Event()
         self._running = False
+        self._requested_scopes = list(REQUESTED_GATEWAY_SCOPES)
+        self._server_version = ""
+        self._protocol: Optional[int] = None
+        self._advertised_methods: Set[str] = set()
+        self._advertised_events: Set[str] = set()
+        self._method_capabilities: Dict[str, Dict[str, Any]] = {}
+        self._last_error: Optional[str] = None
 
     @property
     def is_connected(self) -> bool:
@@ -150,6 +204,141 @@ class GatewayClient:
     def on_event(self, event_name: str, handler: Callable):
         """Register a handler for Gateway push events (e.g. 'chat', 'agent')."""
         self._event_handlers.setdefault(event_name, []).append(handler)
+
+    def on_status_change(self, handler: Callable):
+        """Register a handler for connection or capability changes."""
+        self._status_handlers.append(handler)
+
+    def _get_method_capability(self, method: str) -> Dict[str, Any]:
+        advertised = method in self._advertised_methods if self._advertised_methods else False
+        cap = self._method_capabilities.setdefault(method, {
+            "advertised": advertised,
+            "allowed": None,
+            "reason": None,
+        })
+        if cap.get("advertised") != advertised:
+            cap["advertised"] = advertised
+        return cap
+
+    def _set_method_capability(self, method: str, allowed: Optional[bool], reason: Optional[str] = None) -> bool:
+        cap = self._get_method_capability(method)
+        next_reason = reason or None
+        changed = (
+            cap.get("advertised") != (method in self._advertised_methods if self._advertised_methods else False)
+            or cap.get("allowed") != allowed
+            or cap.get("reason") != next_reason
+        )
+        cap["advertised"] = method in self._advertised_methods if self._advertised_methods else False
+        cap["allowed"] = allowed
+        cap["reason"] = next_reason
+        return changed
+
+    def _apply_capability_aliases(self, methods: List[str], allowed: Optional[bool], reason: Optional[str] = None) -> bool:
+        changed = False
+        for method in methods:
+            changed = self._set_method_capability(method, allowed, reason) or changed
+        return changed
+
+    def is_method_available(self, method: str) -> Optional[bool]:
+        cap = self._get_method_capability(method)
+        if not cap.get("advertised"):
+            return False
+        return cap.get("allowed")
+
+    def get_status_snapshot(self) -> dict:
+        def _capability_dict(method: str) -> dict:
+            cap = self._get_method_capability(method)
+            return {
+                "advertised": bool(cap.get("advertised")),
+                "allowed": cap.get("allowed"),
+                "reason": cap.get("reason"),
+            }
+
+        chat_send = self.is_method_available("chat.send")
+        sessions_patch = self.is_method_available("sessions.patch")
+
+        if not self.is_connected:
+            mode = "offline"
+            summary = self._last_error or "Gateway offline"
+        elif chat_send is False:
+            mode = "read_only"
+            summary = "Gateway connected — chat send unavailable"
+        elif sessions_patch is False:
+            mode = "limited"
+            summary = "Gateway connected — session model control unavailable"
+        elif chat_send is None or sessions_patch is None:
+            mode = "checking"
+            summary = "Gateway connected — verifying capabilities"
+        else:
+            mode = "online"
+            summary = "Gateway connected"
+
+        if self._server_version and mode != "offline":
+            summary = f"{summary} (v{self._server_version})"
+
+        return {
+            "connected": self.is_connected,
+            "serverVersion": self._server_version,
+            "protocol": self._protocol,
+            "requestedScopes": list(self._requested_scopes),
+            "mode": mode,
+            "summary": summary,
+            "lastError": self._last_error,
+            "capabilities": {
+                alias: _capability_dict(method)
+                for alias, method in CAPABILITY_METHODS.items()
+            },
+        }
+
+    async def _emit_status_change(self):
+        if not self._status_handlers:
+            return
+        snapshot = self.get_status_snapshot()
+        for handler in self._status_handlers:
+            try:
+                result = handler(snapshot)
+                if asyncio.iscoroutine(result):
+                    await result
+            except Exception as e:
+                logger.warning(f"GatewayClient: status handler error: {e}")
+
+    async def _probe_runtime_capabilities(self):
+        if not self.is_connected:
+            return
+
+        if "chat.abort" in self._advertised_methods:
+            await self._probe_authorization(
+                "chat.abort",
+                {"sessionKey": "agent:__synapse_capability_probe__:main"},
+                alias_methods=["chat.send", "chat.abort"],
+            )
+
+        if "sessions.patch" in self._advertised_methods:
+            await self._probe_authorization(
+                "sessions.patch",
+                {"key": "agent:__synapse_capability_probe__:main", "thinkingLevel": "off"},
+                alias_methods=["sessions.patch"],
+            )
+
+    async def _probe_authorization(self, method: str, params: dict, alias_methods: Optional[List[str]] = None):
+        alias_methods = alias_methods or [method]
+        try:
+            await self._request(method, params)
+            # Probe succeeded — mark all aliased methods as allowed
+            if self._apply_capability_aliases(alias_methods, True, None):
+                await self._emit_status_change()
+        except GatewayRPCError as e:
+            if e.is_missing_scope() or e.is_auth_issue():
+                if self._apply_capability_aliases(alias_methods, False, e.message):
+                    await self._emit_status_change()
+            elif e.is_not_found():
+                if self._apply_capability_aliases(alias_methods, True, None):
+                    await self._emit_status_change()
+            else:
+                if self._apply_capability_aliases(alias_methods, True, e.message):
+                    await self._emit_status_change()
+        except Exception as e:
+            logger.warning(f"GatewayClient: capability probe for {method} failed: {e}")
 
     async def connect(self):
         """Establish WebSocket and authenticate."""
@@ -160,11 +349,15 @@ class GatewayClient:
         """Open socket, perform two-phase handshake, start listener."""
         print(f"[GatewayClient] Connecting to {self.url}...")
         try:
-            self.ws = await websockets.connect(
-                self.url,
-                max_size=2**21,
-                origin="http://localhost:3000"
-            )
+            connect_kwargs = {"max_size": 2**21}
+            if GATEWAY_ORIGIN:
+                connect_kwargs["origin"] = GATEWAY_ORIGIN
+            if self.url.startswith("wss://"):
+                ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+                ssl_ctx.check_hostname = False
+                ssl_ctx.verify_mode = ssl.CERT_NONE
+                connect_kwargs["ssl"] = ssl_ctx
+            self.ws = await websockets.connect(self.url, **connect_kwargs)
             print(f"[GatewayClient] WebSocket opened to {self.url}")
             logger.info(f"GatewayClient: WebSocket opened to {self.url}")
 
@@ -187,15 +380,15 @@ class GatewayClient:
                     "minProtocol": 3,
                     "maxProtocol": 3,
                     "client": {
-                        "id": "openclaw-control-ui",
+                        "id": GATEWAY_CLIENT_ID,
                         "displayName": "Mission Control",
                         "version": "1.0.0",
                         "platform": "linux",
-                        "mode": "ui",
+                        "mode": GATEWAY_CLIENT_MODE,
                     },
                     "auth": {"token": self.token},
                     "role": "operator",
-                    "scopes": ["operator.admin"],
+                    "scopes": list(self._requested_scopes),
                 },
             }
             await self.ws.send(json.dumps(connect_frame))
@@ -204,7 +397,16 @@ class GatewayClient:
             raw = await asyncio.wait_for(self.ws.recv(), timeout=5.0)
             hello = json.loads(raw)
             if hello.get("type") == "res" and hello.get("ok"):
-                server = hello.get("payload", {}).get("server", {})
+                payload = hello.get("payload", {})
+                server = payload.get("server", {})
+                features = payload.get("features", {})
+                self._server_version = server.get("version", "")
+                self._protocol = payload.get("protocol")
+                self._advertised_methods = set(features.get("methods", []))
+                self._advertised_events = set(features.get("events", []))
+                for method in CAPABILITY_METHODS.values():
+                    self._get_method_capability(method)
+                self._last_error = None
                 logger.info(f"GatewayClient: authenticated — server v{server.get('version', '?')}")
             else:
                 err = hello.get("error", {}).get("message", "unknown error")
@@ -213,14 +415,18 @@ class GatewayClient:
             # Start listener for ongoing frames
             self._listen_task = asyncio.create_task(self._listen())
             self._connected.set()
+            await self._emit_status_change()
+            await self._probe_runtime_capabilities()
 
         except Exception as e:
             print(f"[GatewayClient] CONNECT FAILED: {e}")
             logger.error(f"GatewayClient: connect failed: {e}")
+            self._last_error = str(e)
             self._connected.clear()
             if self.ws:
                 await self.ws.close()
                 self.ws = None
+            await self._emit_status_change()
             if self._running:
                 self._schedule_reconnect()
 
@@ -239,6 +445,8 @@ class GatewayClient:
             if not fut.done():
                 fut.set_exception(ConnectionError("GatewayClient disconnected"))
         self._pending.clear()
+        self._last_error = "Gateway offline"
+        await self._emit_status_change()
         logger.info("GatewayClient: disconnected")
 
     # -- RPC methods --------------------------------------------------------
@@ -256,16 +464,15 @@ class GatewayClient:
         })
         return res.get("payload", {}).get("sessions", [])
 
-    async def send_message(self, session_key: str, message: str) -> dict:
+    async def send_message(self, session_key: str, message: str, idempotency_key: Optional[str] = None) -> dict:
         """Call chat.send — send message to a session. Returns ack with runId.
         
         Note: Model overrides must be set via session_status, not chat.send.
         """
-        idempotency_key = str(uuid.uuid4())
         params = {
             "sessionKey": session_key,
             "message": message,
-            "idempotencyKey": idempotency_key,
+            "idempotencyKey": idempotency_key or str(uuid.uuid4()),
         }
         return await self._request("chat.send", params)
 
@@ -310,11 +517,24 @@ class GatewayClient:
             result = await asyncio.wait_for(future, timeout=30)
             if not result.get("ok", True):
                 err = result.get("error", {})
-                raise RuntimeError(f"Gateway RPC {method} failed: {err.get('message', err)}")
+                rpc_error = GatewayRPCError(method, err if isinstance(err, dict) else {"message": str(err)})
+                changed = False
+                if rpc_error.is_missing_scope() or rpc_error.is_auth_issue():
+                    changed = self._set_method_capability(method, False, rpc_error.message)
+                elif rpc_error.code in {"METHOD_NOT_FOUND", "UNKNOWN_METHOD"}:
+                    self._advertised_methods.discard(method)
+                    changed = self._set_method_capability(method, False, rpc_error.message)
+                if changed:
+                    await self._emit_status_change()
+                raise rpc_error
+            if self._set_method_capability(method, True, None):
+                await self._emit_status_change()
             return result
         except (ConnectionClosed, ConnectionError) as e:
             logger.warning(f"GatewayClient: request {method} failed: {e}")
             self._connected.clear()
+            self._last_error = str(e)
+            await self._emit_status_change()
             if self._running:
                 self._schedule_reconnect()
             raise
@@ -351,12 +571,15 @@ class GatewayClient:
 
         except ConnectionClosed as e:
             logger.warning(f"GatewayClient: connection closed: {e}")
+            self._last_error = str(e)
         except asyncio.CancelledError:
             return
         except Exception as e:
             logger.error(f"GatewayClient: listener error: {e}")
+            self._last_error = str(e)
         finally:
             self._connected.clear()
+            await self._emit_status_change()
             if self._running:
                 self._schedule_reconnect()
 
@@ -463,20 +686,18 @@ class AgentRouter:
         self._status_task: Optional[asyncio.Task] = None
         self._running = False
 
-        # Track active runs to route responses back to correct clients
-        # runId -> {agent_id, client_id, started_at}
+        # Track active runs to route terminal events back to the initiating client.
+        # runId -> {agent_id, client_id, client_message_id, text, started_at}
         self._active_runs: Dict[str, dict] = {}
 
-        # Local model overrides (persisted to data/model_overrides.json)
+        # Runtime model overrides applied through Synapse session controls.
         self._model_overrides: Dict[str, str] = {}
-        self._load_model_overrides()
 
         # Initialize agents from registry
         for agent_id, info in AGENT_REGISTRY.items():
             org_id = info.get("org", "internal")
             org_info = ORGANIZATIONS.get(org_id, ORGANIZATIONS["internal"])
-            # Apply local model override if it exists
-            model = self._model_overrides.get(agent_id, info["model"])
+            model = self._normalize_model_id(info["model"]) or info["model"]
             self.agents[agent_id] = AgentStatus(
                 agent_id=agent_id,
                 name=info["name"],
@@ -487,56 +708,18 @@ class AgentRouter:
                 org_color=org_info["color"]
             )
 
-    def _load_model_overrides(self):
-        """Load model overrides from persistent JSON file."""
-        path = os.path.join(os.path.dirname(__file__), "data", "model_overrides.json")
-        try:
-            with open(path) as f:
-                self._model_overrides = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            self._model_overrides = {}
-
-    def _save_model_overrides(self):
-        """Save model overrides to persistent JSON file."""
-        path = os.path.join(os.path.dirname(__file__), "data", "model_overrides.json")
-        with open(path, 'w') as f:
-            json.dump(self._model_overrides, f, indent=2)
-
     @staticmethod
     def _load_models_from_config():
         """Load valid models, aliases, and display names dynamically from gateway config."""
-        try:
-            config_path = os.path.expanduser("~/.openclaw/openclaw.json")
-            with open(config_path, 'r') as f:
-                config = json.load(f)
-            models_cfg = config.get("agents", {}).get("defaults", {}).get("models", {})
-            valid = set()
-            aliases = {}
-            full_names = {}
-            display_names = {}
-            for model_id, info in models_cfg.items():
-                alias = info.get("alias", "")
-                # model_id is already the full qualified name (e.g. "anthropic/claude-opus-4-6", "google/gemini-3-pro-preview")
-                # Extract short name: strip provider prefix
-                parts = model_id.split("/", 1)
-                short = parts[1] if len(parts) > 1 else model_id
-                
-                # Accept full id, short id, and alias — all resolve to the full model_id
-                valid.add(model_id)
-                valid.add(short)
-                full_names[model_id] = model_id
-                full_names[short] = model_id
-                aliases[model_id] = model_id
-                aliases[short] = model_id
-                display_names[model_id] = alias or short
-                if alias:
-                    valid.add(alias)
-                    full_names[alias] = model_id
-                    aliases[alias] = model_id
-            return valid, full_names, aliases, display_names
-        except Exception:
-            # Fallback if config unreadable
-            return {"opus", "sonnet"}, {}, {}, {}
+        catalog = get_model_catalog()
+        valid = set(catalog.valid_inputs)
+        full_names = dict(catalog.canonical_by_input)
+        aliases = dict(catalog.canonical_by_input)
+        display_names = {
+            model.id: model.label
+            for model in catalog.models
+        }
+        return valid, full_names, aliases, display_names
 
     @property
     def VALID_MODELS(self):
@@ -557,6 +740,12 @@ class AgentRouter:
             return model
         return self.MODEL_FULL_NAMES.get(model, model)
 
+    def _normalize_model_id(self, model: str) -> str:
+        """Resolve aliases/short IDs to full provider/model IDs."""
+        if not model:
+            return model
+        return get_model_catalog().resolve(model)
+
     @property
     def MODEL_ALIASES(self):
         _, _, aliases, _ = self._load_models_from_config()
@@ -568,51 +757,49 @@ class AgentRouter:
         return display_names
 
     async def set_agent_model(self, agent_id: str, model: str) -> dict:
-        """Set model override for an agent — persists to gateway config + active session."""
+        """Set a session-scoped model override for an agent."""
         if agent_id not in self.agents:
             return {"ok": False, "error": "Unknown agent"}
-        if model not in self.VALID_MODELS:
-            return {"ok": False, "error": f"Invalid model. Choose from: {', '.join(self.VALID_MODELS)}"}
+        catalog = get_model_catalog()
+        full_model = catalog.resolve(model)
+        unavailable_reason = (
+            explain_model_unavailability(model)
+            or explain_model_unavailability(full_model)
+        )
+        if unavailable_reason:
+            return {"ok": False, "error": unavailable_reason}
+        valid_model_ids = {entry.id for entry in catalog.models}
+        if full_model not in valid_model_ids:
+            return {
+                "ok": False,
+                "error": f"Invalid model. Choose from: {', '.join(sorted(valid_model_ids))}"
+            }
+        if self.gateway.is_method_available("sessions.patch") is False:
+            snapshot = self.gateway.get_status_snapshot()
+            return {
+                "ok": False,
+                "error": snapshot.get("summary") or "Session model control is unavailable on the current gateway connection.",
+            }
 
-        # Resolve alias to full model name for gateway
-        full_model = self.MODEL_ALIASES.get(model, model)
-
-        # 1. Persist to gateway config (survives session resets)
-        try:
-            config_path = os.path.expanduser("~/.openclaw/openclaw.json")
-            with open(config_path, 'r') as f:
-                config = json.load(f)
-            
-            agents_list = config.get("agents", {}).get("list", [])
-            for agent_cfg in agents_list:
-                if agent_cfg.get("id") == agent_id:
-                    agent_cfg["model"] = full_model
-                    break
-            
-            with open(config_path, 'w') as f:
-                json.dump(config, f, indent=2)
-            
-            logger.info(f"Persisted model {full_model} for {agent_id} to gateway config")
-        except Exception as e:
-            logger.error(f"Failed to persist model to config for {agent_id}: {e}")
-            # Continue — session override still useful even if config write fails
-
-        # 2. Apply to active session via sessions.configure RPC
         session_key = f"agent:{agent_id}:main"
+
         try:
-            result = await self.gateway._request("sessions.configure", {
-                "sessionKey": session_key,
+            await self.gateway._request("sessions.patch", {
+                "key": session_key,
                 "model": full_model,
             })
-            logger.info(f"Set gateway session model for {agent_id} to {full_model}: {result.get('ok', False)}")
+            logger.info(f"Set gateway session model for {agent_id} to {full_model}: True")
+        except GatewayRPCError as e:
+            logger.error(f"Failed to set gateway session model for {agent_id}: {e}")
+            return {"ok": False, "error": e.message}
         except Exception as e:
             logger.error(f"Failed to set gateway session model for {agent_id}: {e}")
+            return {"ok": False, "error": str(e)}
 
-        self._model_overrides[agent_id] = model
-        self._save_model_overrides()
+        self._model_overrides[agent_id] = full_model
 
         # Apply immediately to in-memory state
-        self.agents[agent_id].model = model
+        self.agents[agent_id].model = full_model
         await self._broadcast_all_status()
 
         return {"ok": True, "agent": agent_id, "model": full_model}
@@ -652,14 +839,68 @@ class AgentRouter:
         
         # Handle 'agent' events (run status updates)
         self.gateway.on_event("agent", self._handle_gateway_agent_event)
+
+        # Broadcast connection and capability changes to the UI.
+        self.gateway.on_status_change(self._handle_gateway_status_change)
         
         logger.info("AgentRouter: Gateway event handlers registered")
+
+    async def _handle_gateway_status_change(self, snapshot: dict):
+        if not self._running:
+            return
+        await self.manager.broadcast({
+            "type": "gateway_status",
+            "ts": datetime.now().isoformat(),
+            "payload": snapshot,
+        })
+
+    async def _broadcast_agent_status(self, agent_id: str):
+        agent = self.agents.get(agent_id)
+        if not agent:
+            return
+        await self.manager.broadcast({
+            "type": "status",
+            "agentId": agent_id,
+            "ts": datetime.now().isoformat(),
+            "payload": agent.to_dict(),
+        })
+
+    def _resolve_agent_id(self, session_key: str, run_id: str = "") -> Optional[str]:
+        """Resolve an agent id from Gateway chat/session metadata."""
+        if session_key.startswith("agent:"):
+            parts = session_key.split(":")
+            if len(parts) >= 2 and parts[1] in self.agents:
+                return parts[1]
+
+        for agent_id, agent in self.agents.items():
+            if agent.session_key == session_key:
+                return agent_id
+
+        run_info = self._active_runs.get(run_id, {})
+        return run_info.get("agent_id")
+
+    def _get_run_recipients(self, agent_id: str, run_id: str) -> tuple[List[str], dict]:
+        """Return current subscribers or the initiating client for a run."""
+        subscribers = self.manager.get_subscribers_for_agent(agent_id)
+        run_info = self._active_runs.get(run_id, {})
+        fallback_client = run_info.get("client_id")
+        if not subscribers and fallback_client and fallback_client in self.manager.active_connections:
+            subscribers = [fallback_client]
+        return subscribers, run_info
+
+    async def _send_to_clients(self, client_ids: List[str], message: dict):
+        for client_id in client_ids:
+            try:
+                await self.manager.send_to_client(client_id, message)
+            except Exception as e:
+                logger.debug(f"Failed to send {message.get('type')} to {client_id[:8]}: {e}")
 
     async def _handle_gateway_chat_event(self, frame: dict):
         """Handle chat events from Gateway - relay to Synapse clients.
         
-        Gateway events are STATUS notifications, not content delivery.
-        When state="final", we spawn a task to fetch the response (can't block listener).
+        Chat streams now carry enough payload to relay directly on the terminal event
+        without scraping history first. We still fall back to history if the final
+        payload does not include a displayable assistant message.
         """
         payload = frame.get("payload", {})
         session_key = payload.get("sessionKey", "")
@@ -669,32 +910,11 @@ class AgentRouter:
         # Log chat events at debug level for diagnostics
         logger.debug(f"Chat event: state={state} session={session_key[:20] if session_key else 'none'}")
         
-        # Spawn async task for final state to avoid deadlock with listener
-        if state == "final":
-            asyncio.create_task(self._handle_final_response(frame))
+        if state in {"final", "aborted", "error"}:
+            asyncio.create_task(self._handle_terminal_response(frame))
             return
-        
-        # Find agent by session key - format is agent:<agent_id>:<session_name>
-        agent_id = None
-        if session_key.startswith("agent:"):
-            parts = session_key.split(":")
-            if len(parts) >= 2:
-                potential_agent_id = parts[1]
-                if potential_agent_id in self.agents:
-                    agent_id = potential_agent_id
-        
-        # Fallback: exact match on stored session_key
-        if not agent_id:
-            for aid, agent in self.agents.items():
-                if agent.session_key == session_key:
-                    agent_id = aid
-                    break
-        
-        if not agent_id:
-            # Try to find by runId in active runs
-            run_info = self._active_runs.get(run_id, {})
-            agent_id = run_info.get("agent_id")
-        
+
+        agent_id = self._resolve_agent_id(session_key, run_id)
         if not agent_id:
             logger.debug(f"Chat event for unknown session: {session_key}")
             return
@@ -704,36 +924,27 @@ class AgentRouter:
         # Handle delta events - stream text chunks to Synapse clients
         if state == "delta":
             msg = payload.get("message", {})
-            delta_text = ""
-            
+
             if isinstance(msg, dict):
-                content = msg.get("content", "")
-                # Content can be a string or an array of content blocks
-                if isinstance(content, str):
-                    delta_text = content
-                elif isinstance(content, list):
-                    # Extract text from content blocks [{'type': 'text', 'text': '...'}]
-                    for block in content:
-                        if isinstance(block, dict) and block.get("type") == "text":
-                            delta_text += block.get("text", "")
+                delta_text = self._extract_message_text(msg.get("content", msg.get("text", msg)))
             else:
-                delta_text = msg or payload.get("delta", payload.get("text", ""))
-            
-            if delta_text and isinstance(delta_text, str):
+                delta_text = self._extract_message_text(msg or payload.get("delta", payload.get("text", "")))
+
+            if delta_text:
                 await self._relay_chunk_to_subscribers(agent_id, delta_text, run_id)
             return
         
         # When run starts, update agent state
         if state == "started":
-            # Run started - update agent state
             agent = self.agents.get(agent_id)
             if agent:
                 agent.state = AgentState.WORKING
                 agent.last_activity = datetime.now()
+                await self._broadcast_agent_status(agent_id)
 
     async def _relay_chunk_to_subscribers(self, agent_id: str, delta_text: str, run_id: str):
         """Relay streaming text chunk to subscribed Synapse clients."""
-        subscribers = self.manager.get_subscribers_for_agent(agent_id)
+        subscribers, run_info = self._get_run_recipients(agent_id, run_id)
         if not subscribers:
             return
         
@@ -744,105 +955,114 @@ class AgentRouter:
             "agentId": agent_id,
             "payload": {
                 "text": delta_text,
-                "runId": run_id
+                "runId": run_id,
+                "clientMessageId": run_info.get("client_message_id"),
             }
         }
-        
-        for client_id in subscribers:
-            try:
-                await self.manager.send_to_client(client_id, chunk_frame)
-            except Exception as e:
-                logger.debug(f"Failed to send chunk to {client_id[:8]}: {e}")
 
-    async def _handle_final_response(self, frame: dict):
-        """Fetch and relay final response (runs as separate task to avoid deadlock)."""
+        await self._send_to_clients(subscribers, chunk_frame)
+
+    async def _handle_terminal_response(self, frame: dict):
+        """Relay a terminal chat event and clear run state."""
         payload = frame.get("payload", {})
         session_key = payload.get("sessionKey", "")
         run_id = payload.get("runId", "")
-        
-        # Find agent by session key - format is agent:<agent_id>:<session_name>
-        agent_id = None
-        if session_key.startswith("agent:"):
-            parts = session_key.split(":")
-            if len(parts) >= 2:
-                potential_agent_id = parts[1]
-                if potential_agent_id in self.agents:
-                    agent_id = potential_agent_id
-        
-        # Fallback: exact match on stored session_key
+        terminal_state = payload.get("state", "")
+
+        agent_id = self._resolve_agent_id(session_key, run_id)
         if not agent_id:
-            for aid, agent in self.agents.items():
-                if agent.session_key == session_key:
-                    agent_id = aid
-                    break
-        
-        if not agent_id:
-            run_info = self._active_runs.get(run_id, {})
-            agent_id = run_info.get("agent_id")
-        
-        if not agent_id:
-            logger.debug(f"Final event for unknown session: {session_key}")
+            logger.debug(f"Terminal event for unknown session: {session_key}")
             return
-        
-        subscribers = self.manager.get_subscribers_for_agent(agent_id)
-        
-        # Fallback: if no subscribers, use client_id from _active_runs or broadcast
-        run_info = self._active_runs.get(run_id, {})
-        fallback_client = run_info.get("client_id")
-        if not subscribers and fallback_client and fallback_client in self.manager.active_connections:
-            subscribers = [fallback_client]
-            logger.info(f"Final event for {agent_id}, using fallback client {fallback_client[:8]}")
-        else:
-            logger.info(f"Final event for {agent_id}, {len(subscribers)} subscribers")
-        
+
+        subscribers, run_info = self._get_run_recipients(agent_id, run_id)
         agent = self.agents.get(agent_id)
-        fetch_session_key = agent.session_key if agent else session_key
-        
+        client_message_id = run_info.get("client_message_id")
+        delivered_message = False
+        terminal_text = self._extract_message_text(payload.get("message"))
+        terminal_ts = payload.get("ts", datetime.now().isoformat())
+
         try:
-            messages = await self.gateway.get_history(fetch_session_key, limit=5)
-            logger.info(f"Fetched {len(messages)} messages from history")
-            
-            for msg in reversed(messages):
-                if msg.get("role") == "assistant":
-                    raw_content = msg.get("content", msg.get("text", ""))
-                    text = self._extract_message_text(raw_content)
-                    ts = msg.get("ts", datetime.now().isoformat())
-                    
-                    # Skip internal/system messages (heartbeats, cron prompts, NO_REPLY, etc.)
-                    if self._is_internal_message(text):
-                        logger.debug(f"Skipping internal message for {agent_id}")
+            if terminal_state == "final" and not terminal_text and agent:
+                messages = await self.gateway.get_history(agent.session_key, limit=5)
+                logger.info(f"Fetched {len(messages)} messages from history")
+                for msg in reversed(messages):
+                    if msg.get("role") != "assistant":
                         continue
-                    
-                    message_frame = {
-                        "type": "message",
-                        "agentId": agent_id,
-                        "ts": ts,
-                        "payload": {"role": "assistant", "text": text, "runId": run_id}
+                    raw_content = msg.get("content", msg.get("text", ""))
+                    terminal_text = self._extract_message_text(raw_content)
+                    terminal_ts = msg.get("ts", terminal_ts)
+                    if terminal_text:
+                        break
+
+            if terminal_text and not self._is_internal_message(terminal_text):
+                message_frame = {
+                    "type": "message",
+                    "agentId": agent_id,
+                    "ts": terminal_ts,
+                    "payload": {
+                        "role": "assistant",
+                        "text": terminal_text,
+                        "runId": run_id,
+                        "clientMessageId": client_message_id,
                     }
-                    
-                    if subscribers:
-                        for subscriber_id in subscribers:
-                            await self.manager.send_to_client(subscriber_id, message_frame)
-                    else:
-                        # No subscribers — drop the message, don't broadcast noise
-                        logger.debug(f"No subscribers for {agent_id}, dropping message")
-                    
-                    logger.info(f"Relayed response for {agent_id} ({len(text)} chars)")
-                    break
-            else:
-                logger.warning(f"No assistant message found for {agent_id}")
-                
+                }
+                if subscribers:
+                    await self._send_to_clients(subscribers, message_frame)
+                    delivered_message = True
+                logger.info(f"Relayed terminal response for {agent_id} ({len(terminal_text)} chars)")
+
+            if terminal_state == "aborted":
+                aborted_frame = {
+                    "type": "aborted",
+                    "agentId": agent_id,
+                    "ts": datetime.now().isoformat(),
+                    "payload": {
+                        "aborted": True,
+                        "runId": run_id,
+                        "clientMessageId": client_message_id,
+                    }
+                }
+                if subscribers:
+                    await self._send_to_clients(subscribers, aborted_frame)
+            elif terminal_state == "error":
+                error_text = payload.get("errorMessage") or payload.get("summary") or "Agent run failed"
+                error_frame = {
+                    "type": "error",
+                    "agentId": agent_id,
+                    "ts": datetime.now().isoformat(),
+                    "payload": {
+                        "error": error_text,
+                        "operation": "run",
+                        "runId": run_id,
+                        "clientMessageId": client_message_id,
+                    }
+                }
+                if subscribers:
+                    await self._send_to_clients(subscribers, error_frame)
         except Exception as e:
             logger.error(f"Failed to fetch response for {agent_id}: {type(e).__name__}: {e}")
-        
-        # Update agent state
+
+        finish_frame = {
+            "type": "run_finished",
+            "agentId": agent_id,
+            "ts": datetime.now().isoformat(),
+            "payload": {
+                "state": terminal_state,
+                "runId": run_id,
+                "clientMessageId": client_message_id,
+                "deliveredMessage": delivered_message,
+            }
+        }
+        if subscribers:
+            await self._send_to_clients(subscribers, finish_frame)
+
         if agent:
-            agent.state = AgentState.IDLE
+            agent.state = AgentState.ERROR if terminal_state == "error" else AgentState.IDLE
             agent.task = None
             agent.last_activity = datetime.now()
-        
-        if run_id in self._active_runs:
-            del self._active_runs[run_id]
+            await self._broadcast_agent_status(agent_id)
+
+        self._active_runs.pop(run_id, None)
 
     async def _handle_gateway_agent_event(self, frame: dict):
         """Handle agent events from Gateway - status updates."""
@@ -884,13 +1104,7 @@ class AgentRouter:
         
         agent.last_activity = datetime.now()
         
-        # Broadcast status update
-        await self.manager.broadcast({
-            "type": "status",
-            "agentId": agent_id,
-            "ts": datetime.now().isoformat(),
-            "payload": agent.to_dict()
-        })
+        await self._broadcast_agent_status(agent_id)
 
     async def _poll_status_loop(self):
         """Poll Gateway sessions.list and broadcast status updates."""
@@ -905,6 +1119,9 @@ class AgentRouter:
         """Fetch live status from Gateway via sessions.list RPC."""
         if not self.gateway.is_connected:
             # Fall back to file-based status if Gateway is down
+            await self._update_agent_statuses_from_file()
+            return
+        if self.gateway.is_method_available("sessions.list") is False:
             await self._update_agent_statuses_from_file()
             return
 
@@ -923,8 +1140,6 @@ class AgentRouter:
             key = sess.get("sessionKey") or sess.get("key") or sess.get("id", "")
             if key:
                 session_map[key] = sess
-
-        _, _, _, model_display_names = self._load_models_from_config()
 
         for agent_id, agent in self.agents.items():
             sess = session_map.get(agent.session_key)
@@ -953,16 +1168,10 @@ class AgentRouter:
                 if sess.get("task"):
                     agent.task = sess["task"]
                 if sess.get("model"):
-                    # Model display name from gateway config alias map
-                    raw_model = sess["model"]
-                    display_name = model_display_names.get(raw_model)
-                    if display_name:
-                        agent.model = display_name
-                    else:
-                        agent.model = raw_model.split("/")[-1] if "/" in raw_model else raw_model
+                    agent.model = self._normalize_model_id(sess["model"])
                 # Apply local model override if set
                 if agent_id in self._model_overrides:
-                    agent.model = self._model_overrides[agent_id]
+                    agent.model = self._normalize_model_id(self._model_overrides[agent_id])
 
         await self._broadcast_all_status()
 
@@ -977,8 +1186,21 @@ class AgentRouter:
             with open(status_file, 'r') as f:
                 data = json.load(f)
 
-            for agent_data in data.get("agents", []):
-                agent_id = agent_data.get("id")
+            raw_agents = data.get("agents", [])
+            if isinstance(raw_agents, dict):
+                agent_rows = []
+                for agent_id, payload in raw_agents.items():
+                    if isinstance(payload, dict):
+                        row = dict(payload)
+                        row.setdefault("agentId", agent_id)
+                        agent_rows.append(row)
+            elif isinstance(raw_agents, list):
+                agent_rows = [row for row in raw_agents if isinstance(row, dict)]
+            else:
+                agent_rows = []
+
+            for agent_data in agent_rows:
+                agent_id = agent_data.get("agentId") or agent_data.get("id")
                 if agent_id in self.agents:
                     agent = self.agents[agent_id]
                     state_map = {
@@ -988,13 +1210,14 @@ class AgentRouter:
                         "blocked": AgentState.BLOCKED,
                         "error": AgentState.ERROR,
                     }
-                    agent.context_pct = agent_data.get("context_pct", 0)
-                    agent.state = state_map.get(agent_data.get("status", "idle"), AgentState.IDLE)
-                    agent.session_key = agent_data.get("session_key", agent.session_key)
-                    agent.model = agent_data.get("model", agent.model).replace("claude-", "").replace("-4-5", "").replace("-4", "")
+                    agent.context_pct = agent_data.get("contextPct", agent_data.get("context_pct", 0))
+                    agent.state = state_map.get(agent_data.get("state", agent_data.get("status", "idle")), AgentState.IDLE)
+                    agent.session_key = agent_data.get("sessionKey", agent_data.get("session_key", agent.session_key))
+                    if agent_data.get("model"):
+                        agent.model = self._normalize_model_id(agent_data.get("model"))
                     # Apply local model override if set
                     if agent_id in self._model_overrides:
-                        agent.model = self._model_overrides[agent_id]
+                        agent.model = self._normalize_model_id(self._model_overrides[agent_id])
                     if agent_data.get("emoji"):
                         agent.emoji = agent_data["emoji"]
                     if agent_data.get("name"):
@@ -1013,7 +1236,8 @@ class AgentRouter:
             "type": "status_all",
             "ts": datetime.now().isoformat(),
             "payload": {
-                "agents": [agent.to_dict() for agent in self.agents.values()]
+                "agents": [agent.to_dict() for agent in self.agents.values()],
+                "gateway": self.gateway.get_status_snapshot(),
             }
         }
         await self.manager.broadcast(status_frame)
@@ -1026,7 +1250,8 @@ class AgentRouter:
             "type": "connected",
             "ts": datetime.now().isoformat(),
             "payload": {
-                "agents": [agent.to_dict() for agent in self.agents.values()]
+                "agents": [agent.to_dict() for agent in self.agents.values()],
+                "gateway": self.gateway.get_status_snapshot(),
             }
         }
         await self.manager.send_to_client(client_id, connected_frame)
@@ -1096,25 +1321,40 @@ class AgentRouter:
 
     async def _handle_message(self, client_id: str, agent_id: str, payload: dict) -> dict:
         """Forward message to agent via GatewayClient WebSocket RPC."""
-        text = payload.get("text", "")
+        text = str(payload.get("text", "") or "").strip()
+        client_message_id = str(payload.get("clientMessageId") or uuid.uuid4())
         if not text:
             return {"type": "error", "payload": {"error": "Empty message"}}
+        if self.gateway.is_method_available("chat.send") is False:
+            snapshot = self.gateway.get_status_snapshot()
+            return {
+                "type": "error",
+                "agentId": agent_id,
+                "payload": {
+                    "error": snapshot.get("summary") or "Gateway chat send is unavailable.",
+                    "operation": "message",
+                    "clientMessageId": client_message_id,
+                    "gateway": snapshot,
+                }
+            }
 
         agent = self.agents.get(agent_id)
         if not agent:
             return {"type": "error", "payload": {"error": f"Unknown agent: {agent_id}"}}
 
-        # Update agent state
-        agent.state = AgentState.WORKING
-        agent.task = text[:50]
-        agent.last_activity = datetime.now()
-
-        await self.manager.broadcast({
-            "type": "status",
-            "agentId": agent_id,
-            "ts": datetime.now().isoformat(),
-            "payload": agent.to_dict()
-        })
+        unavailable_reason = explain_model_unavailability(agent.model)
+        if unavailable_reason:
+            return {
+                "type": "error",
+                "agentId": agent_id,
+                "payload": {
+                    "error": unavailable_reason,
+                    "operation": "message",
+                    "clientMessageId": client_message_id,
+                    "model": agent.model,
+                    "gateway": self.gateway.get_status_snapshot(),
+                }
+            }
 
         # Forward via Gateway WebSocket RPC
         # Note: chat.send returns immediately with {runId, status: "started"}
@@ -1122,23 +1362,74 @@ class AgentRouter:
         # Model overrides are set via session_status, not per-message
         
         try:
-            result = await self.gateway.send_message(agent.session_key, text)
+            result = await self.gateway.send_message(
+                agent.session_key,
+                text,
+                idempotency_key=client_message_id,
+            )
             run_id = result.get("payload", {}).get("runId", "")
+            accepted_at = datetime.now().isoformat()
+
+            agent.state = AgentState.WORKING
+            agent.task = text[:50]
+            agent.last_activity = datetime.now()
+            await self._broadcast_agent_status(agent_id)
             
             # Track this run so we can route responses back
             if run_id:
                 self._active_runs[run_id] = {
                     "agent_id": agent_id,
                     "client_id": client_id,
-                    "started_at": datetime.now().isoformat()
+                    "client_message_id": client_message_id,
+                    "text": text,
+                    "started_at": accepted_at,
                 }
 
-            return {"type": "ack", "agentId": agent_id, "payload": {"sent": True, "runId": run_id}}
+            return {
+                "type": "ack",
+                "agentId": agent_id,
+                "payload": {
+                    "sent": True,
+                    "runId": run_id,
+                    "clientMessageId": client_message_id,
+                    "text": text,
+                    "ts": accepted_at,
+                }
+            }
 
+        except GatewayRPCError as e:
+            agent.state = AgentState.IDLE if (e.is_missing_scope() or e.is_auth_issue()) else AgentState.ERROR
+            agent.task = None
+            agent.last_activity = datetime.now()
+            await self._broadcast_agent_status(agent_id)
+            logger.error(f"Failed to send message to {agent_id}: {e}")
+            return {
+                "type": "error",
+                "agentId": agent_id,
+                "payload": {
+                    "error": e.message,
+                    "code": e.code,
+                    "operation": "message",
+                    "clientMessageId": client_message_id,
+                    "gateway": self.gateway.get_status_snapshot(),
+                }
+            }
         except Exception as e:
             agent.state = AgentState.ERROR
+            agent.task = None
+            agent.last_activity = datetime.now()
+            await self._broadcast_agent_status(agent_id)
             logger.error(f"Failed to send message to {agent_id}: {e}")
-            return {"type": "error", "payload": {"error": str(e)}}
+            return {
+                "type": "error",
+                "agentId": agent_id,
+                "payload": {
+                    "error": str(e),
+                    "operation": "message",
+                    "clientMessageId": client_message_id,
+                    "gateway": self.gateway.get_status_snapshot(),
+                }
+            }
 
     async def _handle_history(self, client_id: str, agent_id: str, payload: dict) -> dict:
         """Fetch message history for agent"""
@@ -1215,21 +1506,29 @@ class AgentRouter:
     async def _handle_set_model(self, client_id: str, agent_id: str, payload: dict) -> dict:
         """Set model for an agent"""
         if not agent_id:
-            return {"type": "error", "payload": {"error": "Agent ID required"}}
+            return {"type": "error", "payload": {"error": "Agent ID required", "operation": "set_model"}}
         
         model = payload.get("model")
         if not model:
-            return {"type": "error", "payload": {"error": "Model required"}}
+            return {"type": "error", "agentId": agent_id, "payload": {"error": "Model required", "operation": "set_model"}}
         
         try:
             result = await self.set_agent_model(agent_id, model)
             if not result.get("ok", False):
-                return {"type": "error", "payload": {"error": result.get("error", "Failed to set model")}}
+                return {
+                    "type": "error",
+                    "agentId": agent_id,
+                    "payload": {
+                        "error": result.get("error", "Failed to set model"),
+                        "operation": "set_model",
+                        "gateway": self.gateway.get_status_snapshot(),
+                    }
+                }
             
             # Broadcast updated status to all clients
             agent = self.agents.get(agent_id)
             if agent:
-                agent.model = model
+                agent.model = result.get("model", model)
                 await self.manager.broadcast({
                     "type": "status",
                     "agentId": agent_id,
@@ -1241,11 +1540,19 @@ class AgentRouter:
                 "type": "model_set",
                 "agentId": agent_id,
                 "ts": datetime.now().isoformat(),
-                "payload": {"model": model, "success": True}
+                "payload": {"model": result.get("model", model), "success": True}
             }
         except Exception as e:
             logger.error(f"Failed to set model for {agent_id}: {e}")
-            return {"type": "error", "payload": {"error": str(e)}}
+            return {
+                "type": "error",
+                "agentId": agent_id,
+                "payload": {
+                    "error": str(e),
+                    "operation": "set_model",
+                    "gateway": self.gateway.get_status_snapshot(),
+                }
+            }
 
     # Roles that represent actual conversation turns (not tool machinery)
     _CHAT_ROLES = {"user", "assistant"}
@@ -1258,6 +1565,8 @@ class AgentRouter:
         """
         agent = self.agents.get(agent_id)
         if not agent:
+            return []
+        if self.gateway.is_method_available("chat.history") is False:
             return []
 
         try:
@@ -1279,6 +1588,12 @@ class AgentRouter:
                     "ts": msg.get("ts", datetime.now().isoformat())
                 })
             return result
+        except GatewayRPCError as e:
+            if e.is_missing_scope() or e.is_auth_issue():
+                logger.info(f"Skipping history fetch for {agent_id}: {e.message}")
+                return []
+            logger.error(f"Failed to fetch history for {agent_id}: {e}")
+            return []
         except Exception as e:
             logger.error(f"Failed to fetch history for {agent_id}: {e}")
             return []
@@ -1329,32 +1644,63 @@ class AgentRouter:
         
         Only extracts 'text' type blocks, skips everything else (thinking, tool calls, tool results).
         """
-        if isinstance(content, str):
-            # Check if it looks like tool output (starts with common patterns)
-            if content.strip().startswith(("```", "Successfully", "(no output)", "Command")):
-                # Might be tool output that leaked through - skip short tool outputs
-                if len(content) < 100:
+        def _extract(value, depth: int = 0) -> str:
+            if value is None:
+                return ""
+            if depth > 6:
+                return ""
+
+            if isinstance(value, str):
+                stripped = value.strip()
+                if not stripped:
                     return ""
-            return content
-        
-        if isinstance(content, list):
-            # Extract just the 'text' type blocks, ignore everything else
-            text_parts = []
-            for block in content:
-                if isinstance(block, dict):
-                    block_type = block.get("type", "")
-                    # Only include plain text blocks
-                    if block_type == "text":
-                        text = block.get("text", "")
-                        # Skip if it looks like tool output marker
-                        if text and not text.strip().startswith(("```", "(no output)")):
-                            text_parts.append(text)
-                    # Explicitly skip: thinking, toolCall, toolResult, tool_use, tool_result
-                elif isinstance(block, str):
-                    text_parts.append(block)
-            return "\n".join(text_parts)
-        
-        return str(content) if content else ""
+
+                # OpenClaw may wrap text payloads as JSON strings in newer builds.
+                if stripped[0] in "{[":
+                    try:
+                        parsed = json.loads(stripped)
+                    except json.JSONDecodeError:
+                        parsed = None
+                    if parsed is not None:
+                        extracted = _extract(parsed, depth + 1)
+                        if extracted:
+                            return extracted
+
+                # Skip short tool-output markers.
+                if stripped.startswith(("```", "Successfully", "(no output)", "Command")) and len(stripped) < 100:
+                    return ""
+                return value
+
+            if isinstance(value, list):
+                parts = []
+                for item in value:
+                    text = _extract(item, depth + 1)
+                    if text:
+                        parts.append(text)
+                return "\n".join(parts).strip()
+
+            if isinstance(value, dict):
+                block_type = value.get("type", "")
+                if block_type == "text":
+                    return _extract(value.get("text", ""), depth + 1)
+
+                for key in ("text", "delta", "content", "message", "output"):
+                    if key in value:
+                        text = _extract(value.get(key), depth + 1)
+                        if text:
+                            return text
+
+                nested = []
+                for key, nested_value in value.items():
+                    if isinstance(nested_value, (dict, list)) and key not in {"toolCall", "toolResult", "metadata"}:
+                        text = _extract(nested_value, depth + 1)
+                        if text:
+                            nested.append(text)
+                return "\n".join(nested).strip()
+
+            return str(value) if value else ""
+
+        return _extract(content)
 
     def get_all_status(self) -> List[dict]:
         """Get status of all registered agents"""
@@ -1436,17 +1782,25 @@ _AGENT_WORKSPACES: Dict[str, str] = {}
 def _load_agent_workspaces():
     """Parse openclaw.json to map agent IDs to workspace paths."""
     global _AGENT_WORKSPACES
-    config_path = os.path.expanduser("~/.openclaw/openclaw.json")
+    config_path = get_openclaw_config_path()
+    _AGENT_WORKSPACES = {}
     if not os.path.exists(config_path):
         logger.warning(f"openclaw.json not found at {config_path}")
         return
-    with open(config_path, "r") as f:
-        data = json.load(f)
+
+    try:
+        with open(config_path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning(f"Failed to read openclaw.json at {config_path}: {exc}")
+        return
+
     default_ws = data.get("agents", {}).get("defaults", {}).get("workspace", "")
     for agent in data.get("agents", {}).get("list", []):
         aid = agent.get("id")
-        if aid:
-            _AGENT_WORKSPACES[aid] = agent.get("workspace", default_ws)
+        if not aid:
+            continue
+        _AGENT_WORKSPACES[aid] = agent.get("workspace", default_ws)
     logger.info(f"Loaded {len(_AGENT_WORKSPACES)} agent workspaces")
 
 

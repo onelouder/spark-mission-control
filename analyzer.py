@@ -8,6 +8,7 @@ import httpx
 from typing import Dict, Optional
 from datetime import datetime
 
+from openclaw_runtime import get_primary_chat_runtime, run_primary_chat_completion
 
 def load_config() -> Dict:
     """Load configuration"""
@@ -18,41 +19,22 @@ def load_config() -> Dict:
         return {}
 
 
-# Use Ollama directly - no gateway contention
-OLLAMA_URL = "http://localhost:11434/api/chat"
-OLLAMA_MODEL = "qwen3:30b-a3b"  # Fast, good at classification
-
-
 async def call_llm(messages: list, max_tokens: int = 500, timeout: int = 30) -> Optional[str]:
-    """Call Ollama LLM API directly - bypasses gateway concurrency limits"""
-    
-    payload = {
-        "model": OLLAMA_MODEL,
-        "messages": messages,
-        "stream": False,
-        "options": {
-            "num_predict": max_tokens,
-            "temperature": 0.1
-        }
-    }
-    
+    """Call the primary local OpenAI-compatible runtime."""
+    runtime = get_primary_chat_runtime()
     try:
-        tm = httpx.Timeout(connect=5.0, read=float(timeout), write=5.0, pool=5.0)
-        async with httpx.AsyncClient(timeout=tm) as client:
-            response = await client.post(OLLAMA_URL, json=payload)
-            
-            if response.status_code == 200:
-                data = response.json()
-                return data.get("message", {}).get("content", "")
-            else:
-                print(f"Ollama API error: {response.status_code} - {response.text[:200]}")
-                return None
-                
+        return await run_primary_chat_completion(
+            messages,
+            max_tokens=max_tokens,
+            temperature=0.1,
+            timeout=float(timeout),
+            runtime=runtime,
+        )
     except httpx.TimeoutException:
-        print(f"Ollama call timed out after {timeout}s")
+        print(f"{runtime.label} call timed out after {timeout}s")
         return None
     except Exception as e:
-        print(f"Ollama call failed: {type(e).__name__}: {e}")
+        print(f"{runtime.label} call failed: {type(e).__name__}: {e}")
         return None
 
 
@@ -62,6 +44,10 @@ async def classify_email_triage(subject: str, from_address: str, from_name: str 
     Returns: personal_email, action_required, meeting_request, newsletter, sales_outreach, automated_notification
     """
     
+    subject = str(subject or "")
+    from_address = str(from_address or "")
+    from_name = str(from_name or "")
+
     prompt = f"""Classify this email based on the subject line and sender information:
 
 Subject: {subject}
@@ -96,8 +82,8 @@ Return only the category name, nothing else."""
 
 def fallback_classify_triage(subject: str, from_address: str) -> str:
     """Fallback classification when LLM is unavailable"""
-    subject_lower = subject.lower()
-    from_lower = from_address.lower()
+    subject_lower = str(subject or "").lower()
+    from_lower = str(from_address or "").lower()
     
     # Meeting requests
     if any(word in subject_lower for word in ["meeting", "call", "schedule", "calendar", "invite", "zoom", "teams"]):
@@ -156,10 +142,10 @@ async def analyze_email_content(email_content: Dict) -> Dict:
     Returns detailed analysis including classification, summary, actions, etc.
     """
     
-    subject = email_content.get("subject", "")
+    subject = str(email_content.get("subject") or "")
     body = extract_body_text(email_content)
-    from_name = email_content.get("from", {}).get("name", "")
-    from_address = email_content.get("from", {}).get("address", "")
+    from_name = str(email_content.get("from", {}).get("name") or "")
+    from_address = str(email_content.get("from", {}).get("address") or "")
     
     prompt = f"""Analyze this email and extract key information:
 
@@ -229,9 +215,9 @@ Return only valid JSON, no other text."""
 
 def fallback_analyze_content(email_content: Dict) -> Dict:
     """Fallback analysis when LLM is unavailable"""
-    subject = email_content.get("subject", "")
+    subject = str(email_content.get("subject") or "")
     body = extract_body_text(email_content)
-    from_name = email_content.get("from", {}).get("name", "")
+    from_name = str(email_content.get("from", {}).get("name") or "")
     
     subject_lower = subject.lower()
     body_lower = body.lower()

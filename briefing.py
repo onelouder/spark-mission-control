@@ -18,16 +18,18 @@ in app.py (periodic_briefing_refresh). Manual refresh bypasses cache.
 Data Flow:
 - Reads from: processed_emails.json, tasks.json, contacts.json, snoozed.json
 - Writes to: briefing_cache.json (LLM blocks), briefing_full_cache.json (full briefing)
-- LLM calls: Uses local Ollama (llama3.1:8b) to avoid gateway contention
+- LLM calls: Uses the primary local OpenAI-compatible runtime from openclaw.json
 """
 
 import json
 import os
 import uuid
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 import httpx
 import pytz
+
+from openclaw_runtime import get_primary_chat_runtime, run_primary_chat_completion
 
 # =============================================================================
 # Configuration
@@ -38,6 +40,7 @@ DATA_DIR = "data"
 # Cache files - briefing data is cached to reduce LLM calls
 BRIEFING_CACHE_FILE = os.path.join(DATA_DIR, "briefing_cache.json")      # LLM block cache (threads, pulse)
 BRIEFING_FULL_CACHE_FILE = os.path.join(DATA_DIR, "briefing_full_cache.json")  # Full briefing cache
+BRIEFING_FULL_CACHE_SCHEMA_VERSION = 2  # Adds decisions.items[].received_at for detailed elapsed time
 
 # Data files
 SNOOZED_FILE = os.path.join(DATA_DIR, "snoozed.json")
@@ -45,13 +48,26 @@ PROCESSED_EMAILS_FILE = os.path.join(DATA_DIR, "processed_emails.json")
 TASKS_FILE = os.path.join(DATA_DIR, "tasks.json")
 CONTACTS_FILE = os.path.join(DATA_DIR, "contacts.json")
 
-# LLM Configuration - Uses LOCAL Ollama to avoid gateway saturation
-# (Gateway LLM was causing timeouts when main session is active)
-OLLAMA_URL = "http://localhost:11434/api/chat"
-OLLAMA_MODEL = "qwen3:30b-a3b"
-
 # Pacific timezone for display
 PT = pytz.timezone('America/Los_Angeles')
+
+# Trusted sender tags from deterministic Stage 1 filtering
+_TRUST_TAG_ALIASES = {
+    "t1": "tier1",
+    "t2": "tier2",
+    "int": "internal",
+    "ptr": "partner",
+}
+_TRUSTED_SENDER_TAGS = {
+    "internal",
+    "tier1",
+    "tier2",
+    "partner",
+    "whitelist",
+    "whitelist_domain",
+    "sent_recipient",
+}
+_ACCOUNT_INDEX_CACHE: Optional[Tuple[Dict[str, str], Dict[str, str], Dict[str, List[str]]]] = None
 
 def load_json_file(filename: str, default: Any = None) -> Any:
     """Load JSON file with error handling"""
@@ -71,7 +87,16 @@ def get_cached_briefing() -> Optional[Dict]:
     """Get cached briefing if it exists"""
     try:
         with open(BRIEFING_FULL_CACHE_FILE, 'r') as f:
-            return json.load(f)
+            cache_data = json.load(f)
+
+        if cache_data.get("schema_version") != BRIEFING_FULL_CACHE_SCHEMA_VERSION:
+            try:
+                os.remove(BRIEFING_FULL_CACHE_FILE)
+            except Exception:
+                pass
+            return None
+
+        return cache_data
     except FileNotFoundError:
         return None
     except Exception as e:
@@ -169,51 +194,157 @@ def get_pt_time_str(dt: datetime = None) -> str:
     pt_time = dt.astimezone(PT)
     return pt_time.strftime("%Y-%m-%d %I:%M %p PT")
 
+def _normalize_trust_tag(tag: Optional[str]) -> str:
+    """Normalize tier/trust tags across legacy and current formats."""
+    raw = str(tag or "").strip().lower()
+    return _TRUST_TAG_ALIASES.get(raw, raw)
+
+def _is_trusted_sender(email_info: Dict) -> bool:
+    """Require deterministic trusted sender tags for briefing email inclusion."""
+    stage1_tag = (
+        email_info.get("stages", {})
+        .get("stage1", {})
+        .get("tag")
+    )
+    contact_tier = email_info.get("contact_tier")
+
+    # Prefer Stage 1 deterministic tag when present.
+    trust_tag = _normalize_trust_tag(stage1_tag or contact_tier)
+    return trust_tag in _TRUSTED_SENDER_TAGS
+
+def _get_account_index() -> Tuple[Dict[str, str], Dict[str, str], Dict[str, List[str]]]:
+    """
+    Build account lookup maps:
+    - account_email -> account_id
+    - account_id -> account_email
+    - account_id -> contexts[]
+    """
+    global _ACCOUNT_INDEX_CACHE
+    if _ACCOUNT_INDEX_CACHE is not None:
+        return _ACCOUNT_INDEX_CACHE
+
+    email_to_id: Dict[str, str] = {}
+    id_to_email: Dict[str, str] = {}
+    id_to_contexts: Dict[str, List[str]] = {}
+
+    try:
+        from context_aggregator import get_accounts
+        accounts = get_accounts()
+    except Exception:
+        accounts = []
+
+    for account in accounts:
+        account_id = str(account.get("id") or "").strip()
+        account_email = str(account.get("email") or "").lower().strip()
+        contexts = list(account.get("contexts") or [])
+
+        if not account_id:
+            continue
+        if account_email:
+            email_to_id[account_email] = account_id
+            id_to_email[account_id] = account_email
+        id_to_contexts[account_id] = contexts
+
+    _ACCOUNT_INDEX_CACHE = (email_to_id, id_to_email, id_to_contexts)
+    return _ACCOUNT_INDEX_CACHE
+
+def _infer_account_id(email_id: str, email_data: Dict) -> Optional[str]:
+    """Infer account_id for filtered briefing rows."""
+    explicit_id = str(email_data.get("account_id") or "").strip()
+    if explicit_id:
+        return explicit_id
+
+    raw_account = str(email_data.get("_account") or "").lower().strip()
+    source = str(email_data.get("_source") or "").lower().strip()
+    source_url = str(email_data.get("webLink") or "").lower().strip()
+    msg_id = str(email_data.get("id") or email_id or "")
+
+    email_to_id, _, _ = _get_account_index()
+    if raw_account and raw_account in email_to_id:
+        return email_to_id[raw_account]
+
+    # Legacy Exchange/Office365 messages often lacked account metadata.
+    if (
+        source == "office365"
+        or "outlook.office365.com" in source_url
+        or msg_id.startswith("AAMk")
+    ):
+        return "novvi-outlook"
+
+    if source == "gmail" or "mail.google.com" in source_url:
+        return email_to_id.get(raw_account, "personal-gmail")
+
+    return None
+
+def _infer_context_id(email_data: Dict, account_id: Optional[str]) -> Optional[str]:
+    """Infer context_id from explicit fields, classifier, then account defaults."""
+    explicit_ctx = str(email_data.get("context_id") or "").strip()
+    if explicit_ctx:
+        return explicit_ctx
+
+    email_to_id, id_to_email, id_to_contexts = _get_account_index()
+    account_email = id_to_email.get(account_id or "", "")
+
+    # Use existing deterministic classifier rules where available.
+    try:
+        from context_aggregator import get_aggregator
+        classifier_input = {
+            "from": email_data.get("from", {}),
+            "subject": email_data.get("subject", ""),
+            "_source": email_data.get("_source", ""),
+            "_account": email_data.get("_account", "") or account_email,
+        }
+        ctx = get_aggregator().classify_email(classifier_input)
+        if ctx and ctx != "unknown":
+            return ctx
+    except Exception:
+        pass
+
+    # Fallback: if account maps to a single context, use that.
+    if account_id:
+        contexts = id_to_contexts.get(account_id, [])
+        if len(contexts) == 1:
+            return contexts[0]
+
+    return None
+
+def _email_metadata(email_id: str, email_info: Dict) -> Tuple[Optional[str], Optional[str]]:
+    """Return (account_id, context_id) for briefing item filtering."""
+    email_data = email_info.get("email_data", {}) or {}
+    account_id = _infer_account_id(email_id, email_data)
+    context_id = _infer_context_id(email_data, account_id)
+    return account_id, context_id
+
+def invalidate_briefing_cache() -> None:
+    """Invalidate full briefing cache after mutations."""
+    try:
+        os.remove(BRIEFING_FULL_CACHE_FILE)
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        print(f"[BRIEFING] Failed to invalidate cache: {e}")
+
 async def call_llm(prompt: str, timeout: int = 30) -> Optional[str]:
     """
-    Make LLM API call via local Ollama instance.
-    
-    Uses Ollama instead of gateway to avoid saturation when main session is active.
-    The gateway LLM endpoint was causing timeouts and blocking during heavy use.
-    
-    Args:
-        prompt: The prompt to send to the LLM
-        timeout: Request timeout in seconds (default 30s)
-    
-    Returns:
-        LLM response text, or None if call failed
-    
-    Note:
-        - Uses llama3.1:8b for speed (good enough for classification/summarization)
-        - Low temperature (0.1) for consistent outputs
-        - Max 500 tokens to keep responses concise
+    Call the primary local OpenAI-compatible runtime for briefing generation.
     """
+    runtime = get_primary_chat_runtime()
     try:
-        timeout_config = httpx.Timeout(timeout)
-        async with httpx.AsyncClient(timeout=timeout_config) as client:
-            response = await client.post(
-                OLLAMA_URL,
-                json={
-                    "model": OLLAMA_MODEL,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "stream": False,
-                    "options": {
-                        "num_predict": 500,
-                        "temperature": 0.1
-                    }
-                }
-            )
-            response.raise_for_status()
-            data = response.json()
-            return data.get("message", {}).get("content", "")
+        return await run_primary_chat_completion(
+            [{"role": "user", "content": prompt}],
+            max_tokens=500,
+            temperature=0.1,
+            timeout=float(timeout),
+            runtime=runtime,
+        )
     except httpx.TimeoutException:
-        print(f"[BRIEFING] Ollama API timeout after {timeout}s")
+        print(f"[BRIEFING] {runtime.label} timeout after {timeout}s")
         return None
     except httpx.ConnectError:
-        print(f"[BRIEFING] Ollama API connection error - is Ollama running?")
+        print(f"[BRIEFING] {runtime.label} connection error at {runtime.base_url}")
         return None
     except Exception as e:
-        print(f"[BRIEFING] Ollama API error: {e}")
+        print(f"[BRIEFING] {runtime.label} API error: {e}")
         return None
 
 # =============================================================================
@@ -584,6 +715,10 @@ def build_decisions_block(emails: Dict, contacts: Dict) -> List[Dict]:
     decisions = []
     
     for email_id, email_info in emails.items():
+        # Briefing should only include deterministic trusted senders.
+        if not _is_trusted_sender(email_info):
+            continue
+
         if is_item_snoozed(email_id, "email"):
             continue
         
@@ -598,12 +733,13 @@ def build_decisions_block(emails: Dict, contacts: Dict) -> List[Dict]:
         
         # Check if needs response or action item from high-priority contacts
         classification = analysis.get("classification", "")
-        contact_tier = email_info.get("contact_tier", "unknown").lower()
+        contact_tier = _normalize_trust_tag(email_info.get("contact_tier"))
         
         # Accept both old format (T1/T2/INT) and new format (tier1/tier2/internal)
         high_priority_tiers = ["t1", "t2", "int", "tier1", "tier2", "internal"]
         if classification in ["needs_response", "action_item"] and contact_tier in high_priority_tiers:
             from_info = email_data.get("from", {})
+            account_id, context_id = _email_metadata(email_id, email_info)
             
             # Normalize tier badge for display
             tier_display = {"tier1": "T1", "tier2": "T2", "internal": "INT", "t1": "T1", "t2": "T2", "int": "INT"}.get(contact_tier, contact_tier.upper())
@@ -623,9 +759,12 @@ def build_decisions_block(emails: Dict, contacts: Dict) -> List[Dict]:
                 "subject": email_data.get("subject", "No subject"),
                 "days_waiting": days_since(received_raw),
                 "received_date": received_display,
+                "received_at": received_raw,
                 "summary": analysis.get("summary", "No summary"),
                 "urgency": analysis.get("urgency", "low"),
-                "source_url": email_data.get("webLink", "")
+                "source_url": email_data.get("webLink", ""),
+                "account_id": account_id,
+                "context_id": context_id,
             })
     
     # Sort by urgency then days waiting
@@ -743,6 +882,10 @@ def build_people_waiting_block(emails: Dict, contacts: Dict, decisions_ids: List
     people_waiting = []
     
     for email_id, email_info in emails.items():
+        # Briefing should only include deterministic trusted senders.
+        if not _is_trusted_sender(email_info):
+            continue
+
         if email_id in decisions_ids or is_item_snoozed(email_id, "email"):
             continue
         
@@ -757,23 +900,25 @@ def build_people_waiting_block(emails: Dict, contacts: Dict, decisions_ids: List
         
         # Check if needs response and from known contact
         if not email_data.get("isRead", True):  # Unread emails
-            contact_tier = email_info.get("contact_tier", "UNK")
-            if contact_tier != "UNK":
-                from_info = email_data.get("from", {})
-                days_waiting = days_since(email_data.get("received", ""))
-                tier_weight = calculate_tier_weight(contact_tier)
-                
-                people_waiting.append({
-                    "id": email_id,
-                    "type": "email",
-                    "name": from_info.get("name", "Unknown"),
-                    "tier": contact_tier,
-                    "subject": email_data.get("subject", "No subject"),
-                    "days_waiting": days_waiting,
-                    "action_needed": analysis.get("action_needed", "Review email"),
-                    "sort_weight": tier_weight * days_waiting,
-                    "source_url": email_data.get("webLink", "")
-                })
+            contact_tier = _normalize_trust_tag(email_info.get("contact_tier"))
+            from_info = email_data.get("from", {})
+            days_waiting = days_since(email_data.get("received", ""))
+            tier_weight = calculate_tier_weight(contact_tier)
+            account_id, context_id = _email_metadata(email_id, email_info)
+
+            people_waiting.append({
+                "id": email_id,
+                "type": "email",
+                "name": from_info.get("name", "Unknown"),
+                "tier": contact_tier.upper() if contact_tier else "",
+                "subject": email_data.get("subject", "No subject"),
+                "days_waiting": days_waiting,
+                "action_needed": analysis.get("action_needed", "Review email"),
+                "sort_weight": tier_weight * days_waiting,
+                "source_url": email_data.get("webLink", ""),
+                "account_id": account_id,
+                "context_id": context_id,
+            })
     
     # Sort by weight (tier × days)
     people_waiting.sort(key=lambda x: x["sort_weight"], reverse=True)
@@ -803,6 +948,10 @@ def build_stale_block(tasks: List[Dict], emails: Dict) -> List[Dict]:
     
     # Old action items without tasks (>2 days)
     for email_id, email_info in emails.items():
+        # Briefing should only include deterministic trusted senders.
+        if not _is_trusted_sender(email_info):
+            continue
+
         if is_item_snoozed(email_id, "email") or email_info.get("converted_to_task", False):
             continue
             
@@ -812,13 +961,16 @@ def build_stale_block(tasks: List[Dict], emails: Dict) -> List[Dict]:
         if analysis.get("classification") in ["action_item", "needs_response"]:
             days_old = days_since(email_data.get("received", ""))
             if days_old > 2:
+                account_id, context_id = _email_metadata(email_id, email_info)
                 stale_items.append({
                     "id": email_id,
                     "type": "email",
                     "title": email_data.get("subject", "No subject"),
                     "days_stale": days_old,
                     "source": "Email action item",
-                    "source_url": email_data.get("webLink", "")
+                    "source_url": email_data.get("webLink", ""),
+                    "account_id": account_id,
+                    "context_id": context_id,
                 })
     
     # Sort by days stale
@@ -861,7 +1013,7 @@ async def generate_full_briefing() -> Dict:
         # Generate LLM-powered content with timeouts and fallbacks
         print(f"[DEBUG] Generating threads...")
         try:
-            threads = await generate_active_threads(list(emails.values()), tasks)
+            threads = await generate_active_threads(emails, tasks)
         except Exception as e:
             print(f"[DEBUG] Thread generation failed: {e}")
             threads = []
@@ -920,7 +1072,8 @@ async def generate_full_briefing() -> Dict:
         # Save to cache with timestamp
         cache_data = {
             "briefing": briefing_result,
-            "cached_at": datetime.now(timezone.utc).isoformat()
+            "cached_at": datetime.now(timezone.utc).isoformat(),
+            "schema_version": BRIEFING_FULL_CACHE_SCHEMA_VERSION,
         }
         try:
             save_json_file(BRIEFING_FULL_CACHE_FILE, cache_data)
@@ -955,6 +1108,7 @@ def snooze_item(item_id: str, item_type: str, source_id: str, title: str,
     
     snoozed_data["items"].append(snoozed_item)
     save_snoozed_items(snoozed_data)
+    invalidate_briefing_cache()
     
     return snooze_id
 
@@ -967,6 +1121,7 @@ def unsnooze_item(snooze_id: str) -> bool:
     if len(updated_items) < len(snoozed_data["items"]):
         snoozed_data["items"] = updated_items
         save_snoozed_items(snoozed_data)
+        invalidate_briefing_cache()
         return True
     
     return False
@@ -987,19 +1142,24 @@ def mark_item_done(item_id: str, item_type: str, archived: bool = False) -> bool
             
             processed_emails["emails"] = emails
             save_json_file(PROCESSED_EMAILS_FILE, processed_emails)
+            invalidate_briefing_cache()
             return True
             
     elif item_type == "task":
         # Move task to done/archived column
         tasks = load_json_file(TASKS_FILE, [])
-        
+        updated = False
         for task in tasks:
             if task["id"] == item_id:
                 task["column"] = status
                 task["updated_at"] = datetime.now(timezone.utc).isoformat()
+                updated = True
                 break
-        
-        save_json_file(TASKS_FILE, tasks)
-        return True
+
+        if updated:
+            save_json_file(TASKS_FILE, tasks)
+            invalidate_briefing_cache()
+            return True
+        return False
     
     return False

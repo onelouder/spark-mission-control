@@ -60,6 +60,13 @@ from agent_router import (
     get_agent_config,
     save_agent_config
 )
+from openclaw_runtime import (
+    build_openclaw_subprocess_env,
+    get_local_provider_status_targets,
+    get_primary_chat_runtime,
+    run_primary_chat_completion,
+)
+from synapse_models import get_model_catalog
 
 # Import activity WebSocket broadcaster
 from activity_websocket import activity_broadcaster
@@ -295,7 +302,7 @@ def save_focus_session(session: Optional[Dict]) -> None:
 # =============================================================================
 # Helper Functions
 # =============================================================================
-# Note: Email classification is handled by analyzer.py (LLM-based via Ollama).
+# Note: Email classification is handled by analyzer.py via the primary local runtime.
 # The functions here are for task/Kanban operations only.
 
 def get_energy_for_task(title: str) -> str:
@@ -309,11 +316,18 @@ def get_energy_for_task(title: str) -> str:
     else:
         return "low_stakes"
 
-async def fetch_from_decapoda(endpoint: str) -> Dict:
+async def fetch_from_decapoda(endpoint: str, method: str = "GET", payload: Optional[dict] = None) -> Dict:
     """Fetch data from Decapoda API"""
     async with httpx.AsyncClient() as client:
         try:
-            response = await client.get(f"{DECAPODA_BASE_URL}{endpoint}")
+            method_upper = method.upper()
+            url = f"{DECAPODA_BASE_URL}{endpoint}"
+            if method_upper == "GET":
+                response = await client.get(url)
+            elif method_upper == "POST":
+                response = await client.post(url, json=payload or {})
+            else:
+                raise HTTPException(status_code=400, detail=f"Unsupported method: {method}")
             response.raise_for_status()
             return response.json()
         except httpx.RequestError as e:
@@ -786,11 +800,14 @@ async def get_filtered_emails():
         # Format for display
         audit_data = []
         for email_id, email_data in filtered_emails.items():
+            email_payload = email_data.get("email_data", {})
             audit_data.append({
                 "id": email_id,
-                "subject": email_data["email_data"].get("subject", "No subject"),
-                "from": email_data["email_data"].get("from", {}),
-                "received": email_data["email_data"].get("received"),
+                "subject": email_payload.get("subject", "No subject"),
+                "from": email_payload.get("from", {}),
+                "received": email_payload.get("received"),
+                "source": email_payload.get("_source", "office365"),
+                "account": email_payload.get("_account"),
                 "filter_reason": email_data.get("filter_reason", "Unknown"),
                 "stage": email_data.get("stages", {})
             })
@@ -982,7 +999,7 @@ async def mark_email_spam(email_id: str):
 
 @app.post("/api/email/{email_id}/draft")
 async def draft_email_response(email_id: str):
-    """Generate a draft reply for an email using local Ollama LLM."""
+    """Generate a draft reply for an email using the primary local runtime."""
     try:
         processed_data = load_processed_emails()
         emails = processed_data.get("emails", {})
@@ -1017,20 +1034,13 @@ Write a concise, professional reply. Be direct. Do not use filler phrases like "
 
 DRAFT:"""
 
-        # Call local Ollama (llama3.1:8b — fast, avoids gateway contention)
-        ollama_url = "http://localhost:11434/api/generate"
-        timeout    = httpx.Timeout(45.0)
-        draft_text = None
-
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.post(ollama_url, json={
-                "model":  "llama3.1:8b",
-                "prompt": prompt,
-                "stream": False,
-                "options": {"temperature": 0.4, "num_predict": 300}
-            })
-            if response.status_code == 200:
-                draft_text = response.json().get("response", "").strip()
+        draft_text = await run_primary_chat_completion(
+            [{"role": "user", "content": prompt}],
+            max_tokens=300,
+            temperature=0.4,
+            timeout=45.0,
+            runtime=get_primary_chat_runtime(),
+        )
 
         if not draft_text:
             raise HTTPException(status_code=503, detail="LLM unavailable — try again shortly")
@@ -1289,20 +1299,23 @@ async def briefing_page(request: Request):
 
 @app.get("/nexus")
 async def nexus_page(request: Request):
-    """Nexus multi-agent chat interface (Performance Optimized)"""
-    return templates.TemplateResponse("nexus.html", {"request": request})
+    """Legacy Nexus route - redirect to canonical Synapse interface."""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/synapse", status_code=302)
 
 @app.get("/nexus-enhanced")
 async def nexus_enhanced_page(request: Request):
-    """Nexus Enhanced - Multi-agent chat with agent spawning and management"""
-    return templates.TemplateResponse("nexus-enhanced.html", {"request": request})
+    """Legacy Nexus Enhanced route - redirect to canonical Synapse interface."""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/synapse", status_code=302)
 
 @app.get("/nexus-v2")
 async def nexus_v2_page(request: Request):
-    """Nexus v2 - Multi-pane agent interface with adaptive grid (Phase 1)"""
-    return templates.TemplateResponse("nexus-v2.html", {"request": request})
+    """Compatibility route - redirect to canonical Synapse interface."""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/synapse", status_code=302)
 
-# Removed duplicate route - synapse now serves synapse.html below
+# Removed duplicate route - synapse now serves canonical nexus-v2.html below
 
 @app.get("/cockpit")
 async def cockpit_page():
@@ -1374,7 +1387,12 @@ async def get_briefing_pulse():
         emails = processed_emails.get("emails", {})
         
         pulse = await generate_weekly_pulse(emails)
-        return {"pulse": pulse, "generated_at": datetime.now().isoformat()}
+        # Return both keys for compatibility with existing callers.
+        return {
+            "pulse": pulse,
+            "content": pulse,
+            "generated_at": datetime.now().isoformat()
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate pulse: {str(e)}")
 
@@ -1418,6 +1436,7 @@ async def get_agent_status():
             {"id": "watson", "model": "claude-sonnet-4", "context_pct": 0, "status": "idle", "channel": "unknown"},
             {"id": "willb", "model": "claude-sonnet-4", "context_pct": 0, "status": "idle", "channel": "unknown"},
             {"id": "elon", "model": "claude-sonnet-4", "context_pct": 0, "status": "idle", "channel": "unknown"},
+            {"id": "elon-lite", "model": "gemma-4", "context_pct": 0, "status": "idle", "channel": "unknown"},
         ]
         
         return {
@@ -1557,49 +1576,79 @@ async def get_weather():
         }
 
 
+def _status_from_response(status_code: int) -> str:
+    return "ok" if status_code == 200 else "degraded"
+
+
+async def _check_http_service(name: str, url: str, description: str, port: int) -> dict:
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            response = await client.get(url)
+    except Exception as exc:
+        return {
+            "name": name,
+            "status": "down",
+            "description": description,
+            "port": port,
+            "error": str(exc)[:50],
+        }
+
+    return {
+        "name": name,
+        "status": _status_from_response(response.status_code),
+        "description": description,
+        "port": port,
+    }
+
+
+async def _check_tcp_service(name: str, host: str, port: int, description: str) -> dict:
+    import socket
+
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(2)
+        result = sock.connect_ex((host, port))
+        sock.close()
+    except Exception as exc:
+        return {
+            "name": name,
+            "status": "down",
+            "description": description,
+            "port": port,
+            "error": str(exc)[:50],
+        }
+
+    return {
+        "name": name,
+        "status": "ok" if result == 0 else "down",
+        "description": description,
+        "port": port,
+    }
+
+
 # System Health endpoint
 @app.get("/api/health")
 async def get_system_health():
     """Check status of critical services for the system health widget"""
     services = []
-    
-    async def check_port(name: str, host: str, port: int, description: str) -> dict:
-        """Check if a service is responding on a port"""
-        try:
-            async with httpx.AsyncClient(timeout=2.0) as client:
-                # Try to connect - for HTTP services, hit a simple endpoint
-                if port == 18789:  # Moltbot gateway
-                    resp = await client.get(f"http://{host}:{port}/health")
-                    return {"name": name, "status": "ok" if resp.status_code == 200 else "degraded", 
-                            "description": description, "port": port}
-                elif port == 8766:  # Decapoda-Lite
-                    resp = await client.get(f"http://{host}:{port}/health")
-                    return {"name": name, "status": "ok" if resp.status_code == 200 else "degraded",
-                            "description": description, "port": port}
-                elif port == 11434:  # Ollama
-                    resp = await client.get(f"http://{host}:{port}/api/tags")
-                    return {"name": name, "status": "ok" if resp.status_code == 200 else "degraded",
-                            "description": description, "port": port}
-                else:
-                    # Generic TCP check via socket
-                    import socket
-                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    sock.settimeout(2)
-                    result = sock.connect_ex((host, port))
-                    sock.close()
-                    return {"name": name, "status": "ok" if result == 0 else "down",
-                            "description": description, "port": port}
-        except Exception as e:
-            return {"name": name, "status": "down", "description": description, 
-                    "port": port, "error": str(e)[:50]}
-    
-    # Check services in parallel
+
+    runtime_checks = [
+        _check_http_service(target.name, target.models_url, target.description, target.port)
+        for target in get_local_provider_status_targets()
+    ]
+
     checks = await asyncio.gather(
-        check_port("Moltbot Gateway", "localhost", 18789, "AI orchestration"),
-        check_port("Decapoda-Lite", "localhost", 8766, "Email/Calendar API"),
-        check_port("Wyoming STT", "localhost", 10300, "Speech-to-text"),
-        check_port("Wyoming TTS", "localhost", 10200, "Text-to-speech"),
-        check_port("Ollama", "localhost", 11434, "Local LLM"),
+        _check_http_service("Moltbot Gateway", "http://localhost:18789/health", "AI orchestration", 18789),
+        _check_http_service("Decapoda-Lite", "http://localhost:8766/health", "Email/Calendar API", 8766),
+        _check_tcp_service("Wyoming STT", "localhost", 10300, "Speech-to-text"),
+        _check_tcp_service("Wyoming TTS", "localhost", 10200, "Text-to-speech"),
+        *runtime_checks,
+        _check_http_service(
+            "Nomic Embeddings",
+            "http://192.168.146.138:11434/v1/models",
+            "Embedding service",
+            11434,
+        ),
         return_exceptions=True
     )
     
@@ -2247,7 +2296,7 @@ async def api_open_in_editor(request: EditRequest):
 # Agent Orchestration Routes
 # ============================================================================
 
-MOLTBOT_GATEWAY = os.environ.get("MOLTBOT_GATEWAY", "http://localhost:18789")
+MOLTBOT_GATEWAY = os.environ.get("MOLTBOT_GATEWAY", "http://127.0.0.1:18789")
 MOLTBOT_TOKEN = os.environ.get("MOLTBOT_TOKEN", "1eba89d56887b8dd1845e1d0898935f8ad378ffc28dd556c")
 MOLTBOT_HOME = os.path.expanduser("~/.moltbot")
 
@@ -2262,7 +2311,9 @@ AGENTS = {
     "watson": {"name": "Dr. Watson", "emoji": "🩺", "domain": "Medical", "model": "sonnet"},
     "willb": {"name": "Will B.", "emoji": "🏢", "domain": "CRM/Marketing", "model": "sonnet"},
     "elon": {"name": "ELon", "emoji": "🚀", "domain": "Startup", "model": "sonnet"},
+    "elon-lite": {"name": "ELon (Lite)", "emoji": "🚀", "domain": "Startup", "model": "gemma"},
     "jc": {"name": "JC", "emoji": "⚡", "domain": "General", "model": "sonnet"},
+    "donald": {"name": "Donald", "emoji": "🦉", "domain": "AI/ML Education", "model": "sonnet"},
 }
 
 # Context limits by model
@@ -2596,15 +2647,19 @@ async def get_morning_summary(force: bool = False):
     
     # 3. Calendar events today
     try:
-        from context_aggregator import get_aggregator
-        agg = get_aggregator()
-        events = await agg.get_calendar_events(hours=12)
+        upcoming = await get_upcoming_meetings()
+        events = upcoming.get("meetings", [])
         if events:
-            event_list = [f"- {e.get('title', 'Event')} at {e.get('start_time', '')}" for e in events[:5]]
-            context_parts.append(f"Today's schedule ({len(events)} events):\n" + "\n".join(event_list))
+            event_list = [
+                f"- {e.get('title', 'Event')} at {e.get('start_time', '')}"
+                for e in events[:5]
+            ]
+            context_parts.append(
+                f"Today's schedule ({len(events)} events):\n" + "\n".join(event_list)
+            )
         else:
             context_parts.append("Calendar: No events scheduled today")
-    except:
+    except Exception:
         context_parts.append("Calendar: Unable to fetch")
     
     # 4. Task queue status
@@ -2621,9 +2676,14 @@ async def get_morning_summary(force: bool = False):
     
     # 5. Check if it's early morning (before 9 AM) vs mid-day
     hour = now.hour
-    time_context = "morning" if hour < 12 else "afternoon" if hour < 17 else "evening"
+    if hour < 12:
+        time_context = "morning"
+    elif hour < 17:
+        time_context = "afternoon"
+    else:
+        time_context = "evening"
     
-    # Build prompt for Ollama
+    # Build a concise prompt for the primary local runtime.
     context_block = "\n".join(context_parts)
     prompt = f"""You are a concise executive assistant generating a morning briefing.
 Given the following context, write a 2-3 sentence personalized summary for Jason to read at the start of his day.
@@ -2635,23 +2695,17 @@ Context:
 
 Write a brief, actionable morning summary (2-3 sentences max):"""
 
-    # Call Ollama
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                "http://localhost:11434/api/chat",
-                json={
-                    "model": "qwen3:30b-a3b",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "stream": False
-                }
-            )
-            if resp.status_code == 200:
-                result = resp.json()
-                summary_text = result.get("message", {}).get("content", "").strip()
-            else:
-                summary_text = "Good morning. Unable to generate summary at this time."
-    except Exception as e:
+        summary_text = await run_primary_chat_completion(
+            [{"role": "user", "content": prompt}],
+            max_tokens=500,
+            temperature=0.3,
+            timeout=30.0,
+            runtime=get_primary_chat_runtime(),
+        )
+        if not summary_text:
+            summary_text = "Good morning. Unable to generate summary at this time."
+    except Exception:
         summary_text = f"Good {time_context}. Check your calendar and queue for today's priorities."
     
     # Cache result
@@ -2681,6 +2735,42 @@ async def get_upcoming_meetings():
     import pytz
     PT = pytz.timezone('America/Los_Angeles')
     now = datetime.now(PT)
+    today_local = now.date()
+
+    def parse_event_dt(raw_value):
+        """
+        Parse event datetime from either:
+        - string: "2026-02-26T14:00:00.0000000"
+        - dict: {"dateTime": "...", "timeZone": "..."}
+        Returns timezone-aware datetime converted to PT, or None.
+        """
+        source_tz = PT
+        dt_str = ""
+
+        if isinstance(raw_value, dict):
+            dt_str = raw_value.get("dateTime", "") or raw_value.get("date", "")
+            tz_name = raw_value.get("timeZone", "")
+            if tz_name:
+                try:
+                    source_tz = pytz.timezone(tz_name)
+                except Exception:
+                    source_tz = PT
+        else:
+            dt_str = raw_value or ""
+
+        if not dt_str:
+            return None
+
+        normalized = dt_str.replace('.0000000', '').replace('Z', '+00:00')
+        try:
+            dt = datetime.fromisoformat(normalized)
+        except Exception:
+            return None
+
+        if dt.tzinfo is None:
+            dt = source_tz.localize(dt)
+
+        return dt.astimezone(PT)
     
     meetings = []
     
@@ -2696,8 +2786,6 @@ async def get_upcoming_meetings():
                 # Handle both direct string and nested dict formats for start/end
                 start_raw = event.get("start", "")
                 end_raw = event.get("end", "")
-                start_str = start_raw.get("dateTime", "") if isinstance(start_raw, dict) else start_raw
-                end_str = end_raw.get("dateTime", "") if isinstance(end_raw, dict) else end_raw
                 
                 # Handle location (can be string or dict)
                 loc_raw = event.get("location", "")
@@ -2713,18 +2801,10 @@ async def get_upcoming_meetings():
                 else:
                     organizer = org_raw or ""
                 
-                # Skip events without valid times
-                if not start_str or not end_str:
-                    continue
-                
-                # Parse times (remove trailing zeros from Microsoft format)
-                start_str = start_str.replace('.0000000', '').replace('Z', '+00:00')
-                end_str = end_str.replace('.0000000', '').replace('Z', '+00:00')
-                
-                try:
-                    start_dt = datetime.fromisoformat(start_str)
-                    end_dt = datetime.fromisoformat(end_str)
-                except:
+                # Parse and normalize to Pacific time
+                start_dt = parse_event_dt(start_raw)
+                end_dt = parse_event_dt(end_raw)
+                if not start_dt or not end_dt:
                     continue
                 
                 # Calculate duration
@@ -2733,17 +2813,11 @@ async def get_upcoming_meetings():
                 # Skip all-day events (>= 23 hours)
                 if duration_hours >= 23:
                     continue
-                
-                # Localize datetimes to Pacific
-                if start_dt.tzinfo is None:
-                    start_dt = PT.localize(start_dt)
-                else:
-                    start_dt = start_dt.astimezone(PT)
-                
-                if end_dt.tzinfo is None:
-                    end_dt = PT.localize(end_dt)
-                else:
-                    end_dt = end_dt.astimezone(PT)
+
+                # Only show events that overlap "today" in Pacific time.
+                # This avoids UTC-day bleed where tomorrow events appear late at night.
+                if end_dt.date() < today_local or start_dt.date() > today_local:
+                    continue
                 
                 # Skip events that have already ended
                 if end_dt < now:
@@ -3117,6 +3191,7 @@ AGENT_WORKSPACES = [
     ("/home/jwells/clawd-medical", "watson", "🩺"),
     ("/home/jwells/clawd-novvi", "willb", "🏢"),
     ("/home/jwells/clawd-startup", "elon", "🚀"),
+    ("/home/jwells/clawd-startup-lite", "elon-lite", "🚀"),
 ]
 
 def parse_working_md(filepath: str) -> dict:
@@ -3201,17 +3276,15 @@ async def get_email_quickview():
     # Priority contact unsorted
     priority_unsorted = [e for e in unsorted if e.get("priority_contact")]
     
-    # Top 5 unsorted items (priority first, then recent)
-    def sort_key(e):
-        # Priority contacts first, then by created_at (recent first)
-        priority = 0 if e.get("priority_contact") else 1
-        created = e.get("created_at", "")
-        return (priority, -len(created), created)
-    
-    sorted_unsorted = sorted(unsorted, key=lambda e: (
-        0 if e.get("priority_contact") else 1,
-        e.get("created_at", "")
-    ), reverse=True)
+    # Top 5 unsorted items (priority first, then newest)
+    sorted_unsorted = sorted(
+        unsorted,
+        key=lambda e: (
+            1 if e.get("priority_contact") else 0,
+            e.get("created_at", "")
+        ),
+        reverse=True
+    )
     
     top_items = []
     for e in sorted_unsorted[:5]:
@@ -3237,7 +3310,7 @@ async def get_email_quickview():
 
 @app.get("/synapse")
 async def synapse_page(request: Request):
-    """Synapse - Multi-agent command interface (Nexus v2)"""
+    """Synapse - Canonical multi-pane agent interface."""
     return templates.TemplateResponse("nexus-v2.html", {"request": request})
 
 
@@ -3284,45 +3357,12 @@ async def api_save_agent_config(agent_id: str, request: Request, username: str =
 @app.get("/api/synapse/models")
 async def api_get_models():
     """Return available models from gateway config (dynamic, not hardcoded)."""
-    try:
-        config_path = os.path.expanduser("~/.openclaw/openclaw.json")
-        with open(config_path, 'r') as f:
-            config = json.load(f)
-        models_cfg = config.get("agents", {}).get("defaults", {}).get("models", {})
-        # Explicit display names for clarity
-        DISPLAY_NAMES = {
-            "anthropic/claude-opus-4-5": "Claude Opus 4.5",
-            "anthropic/claude-opus-4-6": "Claude Opus 4.6",
-            "anthropic/claude-sonnet-4-20250514": "Claude Sonnet 4",
-            "anthropic/claude-sonnet-4-6": "Claude Sonnet 4.6",
-            "google/gemini-2.5-pro": "Gemini 2.5 Pro",
-            "google/gemini-2.5-flash": "Gemini 2.5 Flash",
-            "google/gemini-3-pro": "Gemini 3 Pro",
-            "google/gemini-3-pro-preview": "Gemini 3 Pro (Preview)",
-            "google/gemini-3-flash": "Gemini 3 Flash",
-            "google/gemini-3-flash-preview": "Gemini 3 Flash (Preview)",
-        }
-        models = []
-        seen_aliases = set()
-        for model_id, info in models_cfg.items():
-            alias = info.get("alias", "")
-            # Skip duplicate aliases (keep last = most specific)
-            label = DISPLAY_NAMES.get(model_id, "")
-            if not label:
-                label = alias.replace("-", " ").title() if alias else model_id.split("/")[-1].replace("-", " ").title()
-            models.append({
-                "id": model_id,
-                "fullId": model_id,
-                "label": label,
-                "alias": alias,
-            })
-        return {"ok": True, "models": models}
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
+    catalog = get_model_catalog()
+    return catalog.to_api_payload()
 
 @app.put("/api/synapse/agent/{agent_id}/model")
 async def api_set_agent_model(agent_id: str, request: Request, username: str = Depends(require_auth)):
-    """Set model override for an agent (sonnet or opus)"""
+    """Set a session-scoped model override for an agent."""
     body = await request.json()
     model = body.get("model", "")
     result = await agent_router.set_agent_model(agent_id, model)
@@ -3355,8 +3395,7 @@ async def api_sessions_spawn(request: Request, username: str = Depends(require_a
             cmd.extend(["--cleanup", "keep"])
         
         # Execute command with proper environment
-        env = os.environ.copy()
-        env["PATH"] = f"/home/jwells/.npm-global/bin:{env.get('PATH', '')}"
+        env = build_openclaw_subprocess_env(os.environ.copy())
         
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
         
@@ -3395,8 +3434,7 @@ async def api_sessions_send(request: Request, username: str = Depends(require_au
             cmd.extend(["--message", body["message"]])
         
         # Execute command with proper environment
-        env = os.environ.copy()
-        env["PATH"] = f"/home/jwells/.npm-global/bin:{env.get('PATH', '')}"
+        env = build_openclaw_subprocess_env(os.environ.copy())
         
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
         
@@ -3427,8 +3465,7 @@ async def api_sessions_list(username: str = Depends(require_auth)):
         cmd = ["/home/jwells/.npm-global/bin/openclaw", "sessions", "--active", "120", "--json"]
         
         # Execute command with proper environment
-        env = os.environ.copy()
-        env["PATH"] = f"/home/jwells/.npm-global/bin:{env.get('PATH', '')}"
+        env = build_openclaw_subprocess_env(os.environ.copy())
         
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=15, env=env)
         
