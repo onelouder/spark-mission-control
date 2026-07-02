@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="/static/favicon.png">
+    <title>Login — Mission Control v2</title>
+    <link rel="stylesheet" href="/static/ide-noir.css">
+    <link rel="stylesheet" href="/static/mission-control.css">
+    <link rel="stylesheet" href="/static/v2-overrides.css">
+</head>
+<body class="login-page">
+    <main class="login-panel">
+        <h1 class="login-title">Mission Control</h1>
+        <p class="login-sub text-muted">Sign in to continue</p>
+
+        {% if error %}
+        <p class="login-error" role="alert">{{ error }}</p>
+        {% endif %}
+
+        <form method="post" action="/login" class="login-form">
+            <label class="login-label" for="username">Username</label>
+            <input class="login-input" id="username" name="username" type="text" required autocomplete="username">
+
+            <label class="login-label" for="password">Password</label>
+            <input class="login-input" id="password" name="password" type="password" required autocomplete="current-password">
+
+            <button type="submit" class="login-btn">Sign in</button>
+        </form>
+    </main>
+</body>
+</html>

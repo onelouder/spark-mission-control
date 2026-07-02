@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="/static/favicon.png">
+    <title>Mission Control v2</title>
+    <link rel="stylesheet" href="/static/ide-noir.css">
+    <link rel="stylesheet" href="/static/mission-control.css">
+    <link rel="stylesheet" href="/static/v2-overrides.css">
+</head>
+<body class="hub-page surface-page">
+    <nav class="nav-bar">
+        <div class="nav-container">
+            <div class="nav-left">
+                <span class="nav-title">Mission Control <span class="text-muted" style="font-size: 11px;">v2</span></span>
+            </div>
+            <div class="nav-center surface-nav">
+                {% for surface in app_surfaces %}
+                <a
+                    href="{{ surface.href }}"
+                    class="surface-nav-link{% if surface.id == 'hub' %} surface-nav-link--active{% endif %}"
+                    {% if surface.kind == 'external' %}target="_blank" rel="noopener"{% endif %}
+                >{{ surface.label }}{% if surface.kind == 'external' %} ↗{% endif %}</a>
+                {% endfor %}
+            </div>
+            <div class="nav-right surface-nav-right">
+                <span id="health-badge" class="health-badge health-badge--unknown" title="Service health">●</span>
+                {% if username %}
+                <span class="surface-user text-muted">{{ username }}</span>
+                <a href="/logout" class="surface-nav-link">Logout</a>
+                {% endif %}
+            </div>
+        </div>
+    </nav>
+
+    <main class="hub-main surface-main">
+        <h1 class="hub-heading surface-heading">Control plane</h1>
+        <p class="hub-lead surface-lead text-muted">
+            Tasks live in <strong>Project-Box</strong> (Obsidian-backed). Mission Control v2
+            owns email triage, briefing, queue dispatch, and settings.
+        </p>
+
+        <section class="hub-grid">
+            {% for surface in hub_surfaces %}
+            <a
+                class="hub-card{% if surface.primary %} hub-card--primary{% endif %}"
+                href="{{ surface.href }}"
+                {% if surface.kind == 'external' %}target="_blank" rel="noopener"{% endif %}
+            >
+                <span class="hub-card-label">{{ surface.label }}</span>
+                <span class="hub-card-title">{{ surface.title }}</span>
+                <span class="hub-card-meta text-muted">{{ surface.description }}</span>
+            </a>
+            {% endfor %}
+        </section>
+
+        <p class="hub-foot surface-foot text-muted font-mono" style="font-size: 11px;">
+            Task API: <a href="/api/projectbox/tasks">/api/projectbox/tasks</a>
+        </p>
+    </main>
+
+    <script src="/static/health-badge.js"></script>
+</body>
+</html>

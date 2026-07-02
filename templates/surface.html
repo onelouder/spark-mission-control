@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="/static/favicon.png">
+    <title>{% block title %}Mission Control v2{% endblock %}</title>
+    <link rel="stylesheet" href="/static/ide-noir.css?v=20260605-fonts">
+    <link rel="stylesheet" href="/static/mission-control.css">
+    <link rel="stylesheet" href="/static/v2-overrides.css?v=20260612-talk-inline">
+    {% block head_extra %}{% endblock %}
+</head>
+<body class="surface-page">
+    <nav class="nav-bar">
+        <div class="nav-container">
+            <div class="nav-left">
+                <a href="/" class="nav-title-link">Mission Control <span class="text-muted" style="font-size: 11px;">v2</span></a>
+            </div>
+            <div class="nav-center surface-nav">
+                {% for surface in app_surfaces %}
+                <a
+                    href="{{ surface.href }}"
+                    class="surface-nav-link{% if page == surface.id %} surface-nav-link--active{% endif %}"
+                    {% if surface.kind == 'external' %}target="_blank" rel="noopener"{% endif %}
+                >{{ surface.label }}{% if surface.kind == 'external' %} ↗{% endif %}</a>
+                {% endfor %}
+            </div>
+            <div class="nav-right surface-nav-right">
+                <span id="health-badge" class="health-badge health-badge--unknown" title="Service health">●</span>
+                {% if username %}
+                <span class="surface-user text-muted">{{ username }}</span>
+                <a href="/logout" class="surface-nav-link">Logout</a>
+                {% endif %}
+            </div>
+        </div>
+    </nav>
+
+    <main class="surface-main{% if wide_surface %} surface-main--wide{% endif %}{% if page %} surface-main--{{ page }}{% endif %}">
+        {% block content %}{% endblock %}
+    </main>
+
+    <script src="/static/health-badge.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

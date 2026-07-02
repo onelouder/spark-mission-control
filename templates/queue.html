@@ -1,0 +1,178 @@
+{% extends "surface.html" %}
+{% block title %}Agent Queue - Mission Control v2{% endblock %}
+
+{% block content %}
+<section class="queue-page" data-queue-page>
+    <header class="queue-topline">
+        <div>
+            <h1 class="surface-heading">Agent queue</h1>
+            <p class="surface-lead text-muted">
+                Dispatch OpenClaw work through Synapse and track active agent sessions.
+            </p>
+        </div>
+        <div class="queue-top-actions">
+            <span class="queue-stats font-mono" id="queue-stats">Loading</span>
+            <button type="button" class="surface-btn" id="queue-refresh">Refresh</button>
+        </div>
+    </header>
+
+    <section class="queue-agent-strip">
+        <span class="queue-strip-label">Agents</span>
+        <div class="queue-agent-list" id="agent-status-list"></div>
+    </section>
+
+    <form class="quick-add-form queue-quick-add" id="quick-add-form">
+        <input
+            type="text"
+            id="quick-add-input"
+            class="quick-add-input"
+            autocomplete="off"
+            placeholder="Quick add task..."
+        >
+        <select id="quick-add-column" class="quick-add-select">
+            <option value="urgent">Urgent</option>
+            <option value="active">Active</option>
+            <option value="queued" selected>Queued</option>
+            <option value="ideas">Ideas</option>
+        </select>
+        <button type="submit" class="surface-btn queue-primary-action">Add</button>
+    </form>
+
+    <div class="queue-board" id="queue-board">
+        <section class="queue-column" data-column="urgent">
+            <div class="queue-header queue-header--urgent">
+                <span class="queue-title">Urgent</span>
+                <span class="queue-count font-mono" data-count="urgent">0</span>
+            </div>
+            <div class="queue-content" id="col-urgent"></div>
+        </section>
+
+        <section class="queue-column" data-column="active">
+            <div class="queue-header queue-header--active">
+                <span class="queue-title">Active</span>
+                <span class="queue-count font-mono" data-count="active">0</span>
+            </div>
+            <div class="queue-content" id="col-active"></div>
+        </section>
+
+        <section class="queue-column" data-column="review">
+            <div class="queue-header queue-header--review">
+                <span class="queue-title">Review</span>
+                <span class="queue-count font-mono" data-count="review">0</span>
+            </div>
+            <div class="queue-content" id="col-review"></div>
+        </section>
+
+        <section class="queue-column" data-column="queued">
+            <div class="queue-header queue-header--queued">
+                <span class="queue-title">Queued</span>
+                <span class="queue-count font-mono" data-count="queued">0</span>
+            </div>
+            <div class="queue-content" id="col-queued"></div>
+        </section>
+
+        <section class="queue-column" data-column="ideas">
+            <div class="queue-header queue-header--ideas">
+                <span class="queue-title">Ideas</span>
+                <span class="queue-count font-mono" data-count="ideas">0</span>
+            </div>
+            <div class="queue-content" id="col-ideas"></div>
+        </section>
+
+        <section class="queue-column" data-column="backlog">
+            <div class="queue-header queue-header--backlog">
+                <span class="queue-title">Backlog</span>
+                <span class="queue-count font-mono" data-count="backlog">0</span>
+            </div>
+            <div class="queue-content" id="col-backlog"></div>
+        </section>
+
+        <section class="queue-column" data-column="archive">
+            <div class="queue-header queue-header--archive">
+                <span class="queue-title">Archive</span>
+                <span class="queue-count font-mono" data-count="archive">0</span>
+            </div>
+            <div class="queue-content" id="col-archive"></div>
+        </section>
+    </div>
+</section>
+
+<div id="item-modal" class="modal hidden">
+    <div class="modal-content queue-modal-content">
+        <h2 class="modal-title">Task details</h2>
+        <input type="hidden" id="modal-item-id">
+
+        <label for="modal-item-title">Title</label>
+        <input type="text" id="modal-item-title" class="modal-input">
+
+        <label for="modal-item-description">Description</label>
+        <textarea id="modal-item-description" class="modal-input" rows="3"></textarea>
+
+        <div class="queue-modal-grid">
+            <div>
+                <label for="modal-item-column">Column</label>
+                <select id="modal-item-column" class="modal-input">
+                    <option value="urgent">Urgent</option>
+                    <option value="active">Active</option>
+                    <option value="review">Review</option>
+                    <option value="queued">Queued</option>
+                    <option value="ideas">Ideas</option>
+                    <option value="backlog">Backlog</option>
+                    <option value="archive">Archive</option>
+                </select>
+            </div>
+            <div>
+                <label for="modal-item-complexity">Complexity</label>
+                <select id="modal-item-complexity" class="modal-input">
+                    <option value="quick">Quick</option>
+                    <option value="medium">Medium</option>
+                    <option value="deep">Deep</option>
+                </select>
+            </div>
+            <div>
+                <label for="modal-item-priority">Priority</label>
+                <input type="number" id="modal-item-priority" class="modal-input" min="0" max="100">
+            </div>
+        </div>
+
+        <label for="modal-item-doc-path">Doc path</label>
+        <input type="text" id="modal-item-doc-path" class="modal-input" placeholder="plans/project.md">
+
+        <label for="modal-item-tags">Tags</label>
+        <input type="text" id="modal-item-tags" class="modal-input" placeholder="research, product">
+
+        <label for="modal-item-notes">Notes</label>
+        <textarea id="modal-item-notes" class="modal-input" rows="3"></textarea>
+
+        <label for="modal-item-agent">Assign to agent</label>
+        <div class="queue-dispatch-row">
+            <select id="modal-item-agent" class="modal-input">
+                <option value="">Auto-route</option>
+            </select>
+            <button type="button" class="surface-btn" id="auto-dispatch-btn">Auto</button>
+            <button type="button" class="surface-btn queue-primary-action" id="dispatch-btn">Dispatch</button>
+        </div>
+
+        <div id="session-info" class="queue-session-info hidden">
+            <span class="queue-strip-label">Session</span>
+            <span id="session-status-text" class="font-mono"></span>
+        </div>
+
+        <div class="queue-history" id="dispatch-history"></div>
+
+        <div class="modal-actions queue-modal-actions">
+            <button type="button" class="surface-btn queue-danger-action" id="delete-item-btn">Delete</button>
+            <div class="queue-modal-save-actions">
+                <button type="button" class="surface-btn" id="close-modal-btn">Cancel</button>
+                <button type="button" class="surface-btn queue-primary-action" id="save-item-btn">Save</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="toast-container"></div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/queue.js"></script>
+{% endblock %}

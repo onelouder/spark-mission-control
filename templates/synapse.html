@@ -1,0 +1,54 @@
+{% extends "surface.html" %}
+{% block title %}Synapse - Mission Control v2{% endblock %}
+{% block head_extra %}
+<meta name="synapse-voice-secure-url" content="{{ voice_secure_synapse_url }}">
+{% endblock %}
+
+{% block content %}
+<section class="synapse-shell" data-synapse>
+    <header class="synapse-toolbar">
+        <div class="synapse-title-group">
+            <h1 class="surface-heading">Synapse</h1>
+            <p class="surface-lead text-muted">Multi-agent chat and terminal streams.</p>
+        </div>
+        <div class="synapse-toolbar-actions">
+            <select id="synapse-layout" class="synapse-select">
+                <option value="1">1 pane</option>
+                <option value="2">2 panes</option>
+                <option value="4" selected>4 panes</option>
+                <option value="6">6 panes</option>
+            </select>
+            <span id="synapse-status" class="synapse-status">Disconnected</span>
+            <button type="button" id="synapse-sessions" class="surface-btn">Sessions</button>
+            <button type="button" id="synapse-reconnect" class="surface-btn">Reconnect</button>
+        </div>
+    </header>
+
+    <div id="synapse-agent-strip" class="synapse-agent-strip"></div>
+    <div id="synapse-grid" class="synapse-grid"></div>
+</section>
+
+<div id="synapse-sessions-overlay" class="synapse-sessions-overlay" aria-hidden="true">
+    <aside class="synapse-sessions-drawer" aria-label="Synapse sessions">
+        <header class="synapse-sessions-header">
+            <div>
+                <h2>Sessions</h2>
+                <p id="synapse-sessions-meta">0/0</p>
+            </div>
+            <div class="synapse-sessions-actions">
+                <button type="button" id="synapse-sessions-refresh" class="surface-btn">Refresh</button>
+                <button type="button" id="synapse-sessions-close" class="surface-btn">Close</button>
+            </div>
+        </header>
+        <input id="synapse-sessions-filter" class="synapse-sessions-filter" type="search" placeholder="Filter sessions">
+        <div id="synapse-sessions-status" class="synapse-sessions-status"></div>
+        <div id="synapse-sessions-list" class="synapse-sessions-list"></div>
+    </aside>
+</div>
+
+<div id="toast-container"></div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/synapse.js?v=20260612-https-voice"></script>
+{% endblock %}

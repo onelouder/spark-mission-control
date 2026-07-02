@@ -1,0 +1,11 @@
+# Block agent access to secrets and local runtime
+.env
+.env.*
+data/
+logs/
+
+# Dependencies and caches — no value for AI context
+venv/
+.venv/
+__pycache__/
+.pytest_cache/

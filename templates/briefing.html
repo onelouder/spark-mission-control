@@ -1,0 +1,32 @@
+{% extends "surface.html" %}
+{% block title %}Briefing — Mission Control v2{% endblock %}
+
+{% block content %}
+<h1 class="surface-heading">Daily briefing</h1>
+<p class="surface-lead text-muted">
+    Decisions, runway, stale tasks, and snoozes. Refresh pulls live data from Postgres, Project-Box, and Decapoda.
+</p>
+
+<div class="surface-toolbar">
+    <button type="button" id="briefing-refresh" class="surface-btn">Refresh</button>
+    <span id="briefing-meta" class="text-muted font-mono" style="font-size: 11px;"></span>
+</div>
+
+<section id="briefing-runway" class="briefing-section">
+    <h2 class="briefing-section-title">Today's runway</h2>
+    <p id="runway-now" class="text-muted font-mono" style="font-size: 11px;"></p>
+    <div id="runway-timeline" class="runway-timeline"></div>
+    <ul id="runway-tasks" class="runway-task-list"></ul>
+</section>
+
+<section id="briefing-blocks" class="briefing-grid"></section>
+
+<p class="surface-foot text-muted font-mono" style="font-size: 11px;">
+    API: <a href="/api/briefing/today">/api/briefing/today</a> ·
+    <a href="/api/briefing/runway">/api/briefing/runway</a>
+</p>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/briefing-page.js"></script>
+{% endblock %}

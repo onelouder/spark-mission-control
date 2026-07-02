@@ -1,0 +1,31 @@
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Local runtime state
+archive/
+data/
+logs/
+*.log
+*.jsonl
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+alembic/versions/__pycache__/
+
+# Local operator context
+AGENTS.md
+
+# Tooling and editor state
+.coverage
+htmlcov/
+.DS_Store
+*.code-workspace

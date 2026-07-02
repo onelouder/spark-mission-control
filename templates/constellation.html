@@ -1,0 +1,91 @@
+{% extends "surface.html" %}
+{% block title %}OpenClaw Constellation — Mission Control v2{% endblock %}
+
+{% block content %}
+<h1 class="surface-heading">OpenClaw constellation</h1>
+
+<section class="constellation-grid">
+    <article class="constellation-panel">
+        <h2 class="constellation-title">Synapse</h2>
+        <dl class="constellation-facts" id="constellation-gateway">
+            <dt>Status</dt><dd>Loading</dd>
+        </dl>
+    </article>
+    <article class="constellation-panel">
+        <h2 class="constellation-title">Queue</h2>
+        <dl class="constellation-facts" id="constellation-queue">
+            <dt>Total</dt><dd>Loading</dd>
+        </dl>
+    </article>
+    <article class="constellation-panel">
+        <h2 class="constellation-title">Configs</h2>
+        <dl class="constellation-facts" id="constellation-config">
+            <dt>Status</dt><dd>Loading</dd>
+        </dl>
+    </article>
+</section>
+
+<section class="constellation-panel constellation-panel--wide">
+    <h2 class="constellation-title">Agents</h2>
+    <div class="agent-grid" id="constellation-agents"></div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(async () => {
+  const gatewayEl = document.getElementById('constellation-gateway');
+  const queueEl = document.getElementById('constellation-queue');
+  const configEl = document.getElementById('constellation-config');
+  const agentsEl = document.getElementById('constellation-agents');
+
+  const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[ch]));
+
+  const facts = (rows) => rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
+
+  try {
+    const res = await fetch('/api/openclaw/constellation');
+    if (!res.ok) throw new Error(res.statusText);
+    const body = await res.json();
+
+    gatewayEl.innerHTML = facts([
+      ['Status', body.gateway.status],
+      ['URL', body.gateway.url || 'not configured'],
+      ['Detail', body.gateway.detail || '']
+    ]);
+    queueEl.innerHTML = facts([
+      ['Total', body.queue.total],
+      ['Columns', JSON.stringify(body.queue.by_column)],
+      ['Sessions', JSON.stringify(body.queue.by_session_status)]
+    ]);
+    configEl.innerHTML = facts([
+      ['Status', body.config.status],
+      ['Source', body.config.source || 'not configured'],
+      ['Editable', body.config.editable ? 'yes' : 'no']
+    ]);
+    agentsEl.innerHTML = body.agents.map((agent) => `
+      <article class="agent-card">
+        <div class="agent-card-head">
+          <span class="agent-name">${esc(agent.name)}</span>
+          <span class="agent-id">${esc(agent.id)}</span>
+        </div>
+        <dl class="agent-stats">
+          <dt>Session</dt><dd>${esc(agent.session_key)}</dd>
+          <dt>Assigned</dt><dd>${esc(agent.assigned)}</dd>
+          <dt>Active</dt><dd>${esc(agent.active)}</dd>
+          <dt>Running</dt><dd>${esc(agent.running)}</dd>
+          <dt>Pending</dt><dd>${esc(agent.pending)}</dd>
+        </dl>
+      </article>
+    `).join('');
+  } catch (err) {
+    gatewayEl.innerHTML = facts([['Status', 'error'], ['Detail', err.message]]);
+    queueEl.innerHTML = facts([['Total', 'unknown']]);
+    configEl.innerHTML = facts([['Status', 'unknown']]);
+    agentsEl.innerHTML = '<p class="text-muted">Could not load agents.</p>';
+  }
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,21 @@
+# Python runtime / caches (keep out of codebase search)
+venv/
+.venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+*.pyc
+*.pyo
+
+# Local secrets and env (gitignored; explicit for indexer)
+.env
+.env.*
+
+# Runtime data
+data/
+logs/
+*.log
+
+# Large / generated artifacts
+*.heapsnapshot
+*.cpuprofile

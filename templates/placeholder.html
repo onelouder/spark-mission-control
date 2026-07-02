@@ -1,0 +1,32 @@
+{% extends "surface.html" %}
+{% block title %}{{ page_title }} — Mission Control v2{% endblock %}
+
+{% block content %}
+<h1 class="surface-heading">{{ page_title }}</h1>
+<p class="surface-lead text-muted">{{ page_lead|safe }}</p>
+
+{% if api_hint %}
+<p class="surface-api-hint text-muted font-mono" style="font-size: 11px;">{{ api_hint|safe }}</p>
+{% endif %}
+
+{% if page == 'queue' %}
+<pre id="queue-preview" class="surface-pre text-muted">Loading queue summary…</pre>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if page == 'queue' %}
+<script>
+(async () => {
+  const el = document.getElementById('queue-preview');
+  try {
+    const res = await fetch('/api/queue/agents');
+    if (!res.ok) throw new Error(res.statusText);
+    el.textContent = JSON.stringify(await res.json(), null, 2);
+  } catch (err) {
+    el.textContent = 'Could not load queue: ' + err.message;
+  }
+})();
+</script>
+{% endif %}
+{% endblock %}
